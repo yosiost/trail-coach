@@ -15,16 +15,23 @@ Tools are authored once in Anthropic's schema (see api/chat.py) and translated
 here to the OpenAI function-calling schema that LiteLLM normalizes on.
 """
 
+from __future__ import annotations
+
 import os
 
-import litellm
-
-# Silently drop request params a given provider doesn't support, so the same
-# call works across providers without provider-specific branching here.
-litellm.drop_params = True
-
+# litellm is imported lazily (it's a heavy import) so the app — and the test
+# suite — can import this module without the LLM stack installed. It's only
+# needed when a completion is actually made.
 _DEFAULT_PROVIDER = "anthropic"
 _DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+def _litellm():
+    import litellm
+    # Silently drop request params a given provider doesn't support, so the same
+    # call works across providers without provider-specific branching here.
+    litellm.drop_params = True
+    return litellm
 
 
 def model_string() -> str:
@@ -81,7 +88,7 @@ def system_message(base: str, context: str | None) -> dict:
 def completion(messages: list[dict], tools: list[dict], max_tokens: int, stream: bool = False):
     """Call the configured model. Returns a ModelResponse (stream=False) or an
     iterable stream wrapper (stream=True), both in OpenAI-normalized shape."""
-    return litellm.completion(
+    return _litellm().completion(
         model=model_string(),
         messages=messages,
         tools=tools,

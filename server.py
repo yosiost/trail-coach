@@ -1,12 +1,10 @@
 """Flask API server — runs on localhost:7432 (local) or $PORT (cloud)."""
+from __future__ import annotations
 
-import hmac
 import logging
 import os
 from pathlib import Path
-from functools import wraps
 from flask import Flask, jsonify, request, session, redirect, url_for, Response, stream_with_context
-from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -25,6 +23,8 @@ from api.chat import (
 from api import onboarding
 from api import persona
 from api import planner
+from api.auth import login_required, init_auth
+from api.security import rate_limited, install_security
 from api.db import (
     init_db, init_athlete_references, get_coach_notes, get_athlete_references,
     list_sessions, get_session, upsert_session, delete_session,
@@ -67,133 +67,14 @@ seed_plan_blob_from_file()    # onboarding PR B: migrate the legacy plan CSV int
 seed_course_blob_from_file()  # onboarding PR B: migrate the legacy course JSON into the DB (once)
 heal_onboarded_flag()  # mark already-configured installs onboarded (skip the setup wizard)
 
-# ── Auth ─────────────────────────────────────────────────────────────────────
-# Default: a single-password gate — no external account, no cloud project.
-#   AUTH_MODE=password  + APP_PASSWORD=<secret>
-# Optional: Google OAuth for those who want it.
-#   AUTH_MODE=oauth     + GOOGLE_CLIENT_ID/SECRET + ALLOWED_EMAILS=a@x.com,b@y.com
-# Escape hatch: AUTH_MODE=none leaves the app open (local dev / public demo only).
-# If AUTH_MODE is unset, we default to oauth when Google creds are present (so an
-# existing OAuth deploy keeps working unchanged), otherwise to the password gate.
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
-# Comma-separated allowlist for OAuth mode (back-compat with singular ALLOWED_EMAIL).
-ALLOWED_EMAILS = {
-    e.strip().lower()
-    for e in (os.environ.get("ALLOWED_EMAILS", "") + "," + os.environ.get("ALLOWED_EMAIL", "")).split(",")
-    if e.strip()
-}
-
-AUTH_MODE = os.environ.get("AUTH_MODE", "").strip().lower()
-if not AUTH_MODE:
-    AUTH_MODE = "oauth" if GOOGLE_CLIENT_ID else "password"
-if AUTH_MODE not in ("password", "oauth", "none"):
-    raise RuntimeError(f"AUTH_MODE must be password | oauth | none (got {AUTH_MODE!r}).")
-if AUTH_MODE == "none":
-    logging.warning("AUTH_MODE=none — the app is UNAUTHENTICATED. Use only for local dev or a public demo.")
-
-google = None
-if AUTH_MODE == "oauth":
-    oauth = OAuth(app)
-    google = oauth.register(
-        name="google",
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
-        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={"scope": "openid email profile"},
-    )
-
-
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if AUTH_MODE == "none" or session.get("authed"):
-            return f(*args, **kwargs)
-        return redirect(url_for("login"))
-    return decorated
-
+# Auth (password/OAuth login + login_required) and request-side protections
+# (rate limiting + secret redaction) live in api/auth.py and api/security.py.
+init_auth(app)
+install_security(app)
 
 import json
 import threading
 import time
-from collections import defaultdict, deque
-
-# ── Rate limiting for the LLM endpoints ──────────────────────────────────────
-# Protects a public/demo instance from abusing the deployment's API key. Sliding
-# 60s window, per client IP plus a global ceiling. Generous defaults so a single
-# self-hoster never notices; set RATE_LIMIT_PER_MIN=0 to disable.
-_RATE_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "20") or 0)
-_RATE_GLOBAL_PER_MIN = int(os.environ.get("RATE_LIMIT_GLOBAL_PER_MIN", "120") or 0)
-_rate_hits: dict = defaultdict(deque)
-_rate_global: deque = deque()
-_rate_lock = threading.Lock()
-
-
-def _client_ip() -> str:
-    xff = request.headers.get("X-Forwarded-For", "")
-    return xff.split(",")[0].strip() if xff else (request.remote_addr or "unknown")
-
-
-def rate_limited(f):
-    """429 when a client (or the instance) exceeds the per-minute LLM-call budget."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if _RATE_PER_MIN <= 0 and _RATE_GLOBAL_PER_MIN <= 0:
-            return f(*args, **kwargs)
-        now = time.time()
-        cutoff = now - 60
-        ip = _client_ip()
-        with _rate_lock:
-            if _RATE_PER_MIN > 0:
-                dq = _rate_hits[ip]
-                while dq and dq[0] < cutoff:
-                    dq.popleft()
-                if len(dq) >= _RATE_PER_MIN:
-                    return jsonify({"error": "Rate limit reached — wait a minute and try again."}), 429
-            if _RATE_GLOBAL_PER_MIN > 0:
-                while _rate_global and _rate_global[0] < cutoff:
-                    _rate_global.popleft()
-                if len(_rate_global) >= _RATE_GLOBAL_PER_MIN:
-                    return jsonify({"error": "This instance is busy right now — try again shortly."}), 429
-            if _RATE_PER_MIN > 0:
-                _rate_hits[ip].append(now)
-            if _RATE_GLOBAL_PER_MIN > 0:
-                _rate_global.append(now)
-        return f(*args, **kwargs)
-    return decorated
-
-
-# ── Secret redaction — belt-and-suspenders so no secret can leak in a JSON body
-# (e.g. an unexpected provider exception echoed via {"error": str(e)}).
-_SECRETS_CACHE = None
-
-
-def _secrets() -> set:
-    global _SECRETS_CACHE
-    if _SECRETS_CACHE is None:
-        keys = ("LLM_API_KEY", "ANTHROPIC_API_KEY", "APP_PASSWORD", "SECRET_KEY",
-                "STRAVA_CLIENT_SECRET", "STRAVA_REFRESH_TOKEN", "GOOGLE_CLIENT_SECRET",
-                "DATABASE_URL")
-        _SECRETS_CACHE = {v for v in (os.environ.get(k, "").strip() for k in keys) if len(v) >= 8}
-    return _SECRETS_CACHE
-
-
-@app.after_request
-def _redact_secrets(resp):
-    try:
-        if resp.mimetype == "application/json" and not resp.direct_passthrough:
-            body = resp.get_data(as_text=True)
-            red = body
-            for sec in _secrets():
-                if sec in red:
-                    red = red.replace(sec, "***REDACTED***")
-            if red != body:
-                resp.set_data(red)
-    except Exception:
-        pass
-    return resp
-
 
 _CACHE_FILE = Path(__file__).parent / "activity_cache.json"
 
@@ -233,87 +114,6 @@ def get_cached_context() -> str:
         _context_cache["text"] = text
         _context_cache["expires_at"] = time.monotonic() + _CONTEXT_TTL
     return text
-
-
-def _login_page(error: str = "") -> str:
-    """Minimal, self-contained password-login page (matches the app's dark theme)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Trail Coach — Sign in</title>
-<style>
-  :root {{ color-scheme: dark; }}
-  * {{ box-sizing: border-box; }}
-  body {{ margin: 0; min-height: 100vh; display: grid; place-items: center;
-    background: #16181c; color: #e8e8e8;
-    font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }}
-  form {{ width: 320px; max-width: 90vw; padding: 32px 28px; background: #1f2227;
-    border: 1px solid #2c2f36; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.4); }}
-  h1 {{ margin: 0 0 4px; font-size: 20px; }}
-  .sub {{ margin: 0 0 22px; color: #9aa0aa; font-size: 13px; }}
-  input {{ width: 100%; padding: 11px 13px; margin-bottom: 14px; font-size: 15px;
-    background: #16181c; color: #e8e8e8; border: 1px solid #3a3e46; border-radius: 9px; }}
-  input:focus {{ outline: none; border-color: #ff7a00; }}
-  button {{ width: 100%; padding: 11px; font-size: 15px; font-weight: 600; cursor: pointer;
-    background: #ff7a00; color: #16181c; border: none; border-radius: 9px; }}
-  button:hover {{ background: #ff9433; }}
-  .err {{ margin: 0 0 14px; padding: 9px 11px; font-size: 13px;
-    background: #3a1d1d; color: #ff9a9a; border: 1px solid #5c2a2a; border-radius: 8px; }}
-</style></head>
-<body>
-  <form method="post" action="/login">
-    <h1>🏔️ Trail Coach</h1>
-    <p class="sub">Enter the app password to continue.</p>
-    {err_html}
-    <input type="password" name="password" placeholder="Password" autofocus required>
-    <button type="submit">Sign in</button>
-  </form>
-</body></html>"""
-
-
-@app.get("/login")
-def login():
-    if AUTH_MODE == "none" or session.get("authed"):
-        return redirect("/")
-    if AUTH_MODE == "oauth":
-        return google.authorize_redirect(url_for("auth_callback", _external=True))
-    return _login_page()
-
-
-@app.post("/login")
-def login_post():
-    if AUTH_MODE != "password":
-        return redirect(url_for("login"))
-    if not APP_PASSWORD:
-        return _login_page("Auth is not configured — set APP_PASSWORD in the environment."), 500
-    if hmac.compare_digest(request.form.get("password", "").encode(), APP_PASSWORD.encode()):
-        session["authed"] = True
-        return redirect("/")
-    return _login_page("Incorrect password."), 401
-
-
-@app.get("/auth/callback")
-def auth_callback():
-    if AUTH_MODE != "oauth":
-        return redirect(url_for("login"))
-    token = google.authorize_access_token()
-    user  = token.get("userinfo", {})
-    email = (user.get("email") or "").lower()
-    if not ALLOWED_EMAILS:
-        return "<h2>Access denied.</h2><p>No ALLOWED_EMAILS configured for OAuth mode.</p>", 403
-    if email not in ALLOWED_EMAILS:
-        return f"<h2>Access denied.</h2><p>{email} is not authorised.</p>", 403
-    session["authed"]     = True
-    session["user_email"] = email
-    session["user_name"]  = user.get("name", email)
-    return redirect("/")
-
-
-@app.get("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
 
 
 @app.get("/")

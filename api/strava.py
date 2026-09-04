@@ -1,4 +1,5 @@
 """Strava API client — replaces Garmin integration for activity fetching."""
+from __future__ import annotations
 
 import csv
 import io

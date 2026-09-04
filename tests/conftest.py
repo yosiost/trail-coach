@@ -6,6 +6,9 @@ import tempfile
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp())
 os.environ.pop("DATABASE_URL", None)   # -> SQLite
 os.environ.pop("SEED_DEMO_DATA", None)  # -> no auto-seed
+os.environ["FLASK_DEBUG"] = "1"          # -> ephemeral SECRET_KEY (no prod guard)
+os.environ["AUTH_MODE"] = "password"
+os.environ["APP_PASSWORD"] = "testpw"
 
 from pathlib import Path
 import pytest
