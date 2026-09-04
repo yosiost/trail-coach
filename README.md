@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/yosiost/trail-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/yosiost/trail-coach/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 ![Provider-agnostic](https://img.shields.io/badge/LLM-provider--agnostic-22c55e.svg)
 
 Trail Coach is a single-tenant web app (installable PWA) that pairs a training-plan/week engine with an AI coach that actually knows your race — its course profile, aid stations, cutoffs, and per-segment fueling. It started as a personal coach for one athlete's UTMB OCC build and has been generalized so **anyone can clone it, wire in their own LLM and race, and self-host it**.
@@ -39,7 +39,7 @@ Trail Coach is a single-tenant web app (installable PWA) that pairs a training-p
 
 ## Quick start (local)
 
-Requires **Python 3.10+**.
+Requires **Python 3.11+**.
 
 ```bash
 git clone https://github.com/yosiost/trail-coach.git
@@ -163,7 +163,7 @@ pytest            # unit tests: planner (date math + LLM-output parsing), db,
                   # onboarding, personas — SQLite, no network, no LLM calls
 ```
 
-CI runs the suite on Python 3.10 / 3.11 / 3.12 ([workflow](.github/workflows/ci.yml)).
+CI runs the suite on Python 3.11 / 3.12 ([workflow](.github/workflows/ci.yml)).
 
 ---
 
