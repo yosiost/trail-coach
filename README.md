@@ -2,6 +2,7 @@
 
 **An open-source, self-hostable AI trail-running coach.** Bring your own race, plan, and activity data — it coaches you toward your goal.
 
+[![CI](https://github.com/yosiost/trail-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/yosiost/trail-coach/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![Provider-agnostic](https://img.shields.io/badge/LLM-provider--agnostic-22c55e.svg)
@@ -151,6 +152,18 @@ trail-coach/
 ├── Procfile             # gunicorn entrypoint
 └── .env.example         # annotated configuration
 ```
+
+---
+
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest            # unit tests: planner (date math + LLM-output parsing), db,
+                  # onboarding, personas — SQLite, no network, no LLM calls
+```
+
+CI runs the suite on Python 3.10 / 3.11 / 3.12 ([workflow](.github/workflows/ci.yml)).
 
 ---
 
