@@ -1,0 +1,72 @@
+{
+  "race": "Skyline 50K (example)",
+  "date": "2025-06-14",
+  "start_time": "07:00",
+  "start_wave": "",
+  "distance_km": 50.0,
+  "vert_m": 2400,
+  "route": "Valley Start → Ridgeline → High Col → Forest Descent → Lakeside → Finish",
+  "high_point": "High Col 1850m",
+  "cutoffs": [
+    { "point": "Ridgeline Aid", "time": "10:00" },
+    { "point": "High Col", "time": "13:30" },
+    { "point": "Lakeside Aid", "time": "16:30" },
+    { "point": "Finish", "time": "19:00" }
+  ],
+  "note": "Example generic course profile — the schema the app reads for both the Course view and the AI coach. Replace this with your own race. Keep it as the single source of truth for course facts.",
+  "segments": [
+    {
+      "n": 1,
+      "name": "Valley Start → Ridgeline",
+      "from_km": 0,
+      "to_km": 12.0,
+      "start_alt": 600,
+      "end_alt": 1400,
+      "caption": "km 0–12.0 · 600m → 1400m",
+      "img": "",
+      "text": "A gentle valley warmup on wide gravel before the trail tips up into a steady, runnable forest climb toward the ridge. Settle into an easy rhythm here — the day is long."
+    },
+    {
+      "n": 2,
+      "name": "Ridgeline → High Col — the crux climb",
+      "from_km": 12.0,
+      "to_km": 24.0,
+      "start_alt": 1400,
+      "end_alt": 1850,
+      "note": "The crux: exposed ridgeline with the day's steepest pitches. Pace conservatively.",
+      "caption": "km 12.0–24.0 · 1400m → 1850m (high point)",
+      "img": "",
+      "text": "The ridgeline is the signature stretch: open, exposed, and scenic, with the steepest pitches of the day on the pull to the High Col. Hike the steep bits efficiently and keep eating."
+    },
+    {
+      "n": 3,
+      "name": "High Col → Lakeside — the long descent",
+      "from_km": 24.0,
+      "to_km": 38.0,
+      "start_alt": 1850,
+      "end_alt": 900,
+      "note": "The biggest sustained descent — protect the quads.",
+      "caption": "km 24.0–38.0 · 1850m → 900m",
+      "img": "",
+      "text": "A long, sustained forest descent that rewards controlled, light footwork. It's not technical, but it's relentless on tired quads — meter it out rather than hammering."
+    },
+    {
+      "n": 4,
+      "name": "Lakeside → Finish",
+      "from_km": 38.0,
+      "to_km": 50.0,
+      "start_alt": 900,
+      "end_alt": 650,
+      "caption": "km 38.0–50.0 · 900m → 650m",
+      "img": "",
+      "text": "Flat, fast lakeside paths to the finish. Zero technicality left — just whatever your legs have to give over the final gently rolling kilometers."
+    }
+  ],
+  "elevation": [
+    { "km": 0,    "alt": 600 },
+    { "km": 12.0, "alt": 1400 },
+    { "km": 24.0, "alt": 1850 },
+    { "km": 38.0, "alt": 900 },
+    { "km": 50.0, "alt": 650 }
+  ]
+}

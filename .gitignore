@@ -1,0 +1,23 @@
+.env
+garmin_cache.json
+trail_coach.db*
+activity_cache.json
+.idea/
+data/
+*.pyc
+__pycache__/
+.DS_Store
+.garmin_tokens/
+garmin_tokens/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+docs/OPEN_SOURCE_ROADMAP.md
+docs/writeup.md
+
+# Local training-plan / course fallback files — the real data lives in the DB
+# (config_blobs); these are only read as a local fallback and are never committed.
+training_plan.csv
+frontend/data/occ_course.json

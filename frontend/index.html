@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Trail Coach</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#f97316" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Trail Coach" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <div id="logo">⛰️ Trail Coach</div>
+      <ul>
+        <li class="nav-item active" data-panel="chat">💬 Chat</li>
+        <li class="nav-item" data-panel="week">📅 This Week</li>
+        <li class="nav-item" data-panel="plan">📋 Full Plan</li>
+        <li class="nav-item" data-panel="race">🏁 Race Plan</li>
+        <li class="nav-item" data-panel="profile">📊 Profile</li>
+        <li class="nav-item" data-panel="course">🎥 Course</li>
+        <li class="nav-item" data-panel="trails">🗺️ Locations</li>
+        <li class="nav-item" data-panel="progress">📈 Progress</li>
+        <li class="nav-item" data-panel="settings">⚙️ Settings</li>
+      </ul>
+    </nav>
+
+    <!-- Main content -->
+    <main id="content">
+
+      <!-- Chat panel -->
+      <div id="panel-chat" class="panel active">
+        <div id="chat-sidebar">
+          <div id="chat-sidebar-header">
+            <button id="btn-new-chat">＋ New Chat</button>
+            <button id="btn-close-sidebar" title="Close">✕</button>
+          </div>
+          <div id="session-list"></div>
+        </div>
+        <div id="chat-sidebar-overlay"></div>
+        <div id="chat-main">
+          <div id="persona-toggle">
+            <button id="persona-coach" class="persona-btn active" data-persona="coach">🏃 Coach</button>
+            <button id="persona-dietitian" class="persona-btn" data-persona="dietitian">🥗 Dietitian</button>
+            <button id="persona-analyst" class="persona-btn" data-persona="analyst">📊 Analyst</button>
+          </div>
+          <div id="chat-messages"></div>
+          <div id="chat-input-area">
+            <button id="btn-history" title="Chat history">☰</button>
+            <textarea id="chat-input" placeholder="Ask your coach…" rows="2"></textarea>
+            <button id="chat-send">Send</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- This Week panel -->
+      <div id="panel-week" class="panel">
+        <div class="panel-header">
+          <h2 id="week-title">Loading…</h2>
+          <div class="week-nav">
+            <select id="week-select"></select>
+            <button id="btn-refresh-week">↻</button>
+            <button id="btn-toggle-detail">📝 Detail</button>
+          </div>
+        </div>
+        <div id="week-summary" class="summary-bar"></div>
+        <table id="week-table">
+          <thead>
+            <tr>
+              <th>Day</th><th>Session</th><th>Planned</th><th>Actual</th><th>HR</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="week-tbody"></tbody>
+        </table>
+        <div id="week-detail-cards" style="display:none"></div>
+      </div>
+
+      <!-- Full Plan panel -->
+      <div id="panel-plan" class="panel">
+        <div class="panel-header">
+          <h2>Training Plan</h2>
+          <button id="btn-generate-plan" title="Generate a plan from your goal race">✨ Generate plan</button>
+          <input id="plan-filter" type="text" placeholder="Filter by week, session…" />
+        </div>
+        <div id="plan-gen-status" style="display:none"></div>
+        <table id="plan-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Week</th><th>Phase</th><th>Session</th><th>km</th><th>Vert</th><th>Zone</th>
+            </tr>
+          </thead>
+          <tbody id="plan-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Race panel -->
+      <div id="panel-race" class="panel">
+        <div class="panel-header"><h2>🏁 Race Plan</h2></div>
+        <div class="race-meta" id="race-meta">
+          Your goal race · Target <span id="race-target-time">—</span>
+        </div>
+        <div class="race-segmented">
+          <button class="race-seg-btn active" data-race-view="plan">Race Plan</button>
+          <button class="race-seg-btn" data-race-view="fuel">Fueling Plan</button>
+        </div>
+
+        <!-- Race Plan sub-view -->
+        <div id="race-view-plan" class="race-view active">
+          <div class="race-hint">Tap any checkpoint for section detail</div>
+          <table id="race-plan-table" class="race-plan-table">
+            <thead>
+              <tr><th>Checkpoint</th><th>km</th><th>↑ tot</th><th>ETA</th></tr>
+            </thead>
+            <tbody id="race-plan-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Fueling Plan sub-view -->
+        <div id="race-view-fuel" class="race-view">
+          <div class="race-fuel-target">Target <strong>85 g/hr</strong> carbs · fuel by aid-station segment</div>
+          <div id="race-fuel-list"></div>
+        </div>
+      </div>
+
+      <!-- Profile panel -->
+      <div id="panel-profile" class="panel">
+        <div class="panel-header"><h2>📊 Course Profile</h2></div>
+        <div class="profile-meta" id="profile-meta"></div>
+        <div class="profile-img-wrap" id="profile-img-wrap"></div>
+        <p class="course-source">
+          The elevation profile and aid-station / cutoff detail come from your course data.
+          Add or edit your course during onboarding.
+        </p>
+      </div>
+
+      <!-- Course panel -->
+      <div id="panel-course" class="panel">
+        <div class="panel-header">
+          <h2>🎥 Course Recon</h2>
+        </div>
+        <p class="course-source">
+          Your race course — elevation profile and a segment-by-segment breakdown, from your course data.
+        </p>
+        <div class="chart-wrap"><canvas id="course-elevation-chart" height="220"></canvas></div>
+
+        <div id="course-story"></div>
+      </div>
+
+      <!-- Locations panel -->
+      <div id="panel-trails" class="panel">
+        <div class="panel-header"><h2>🗺️ Locations</h2></div>
+        <p class="course-source">Your regular training locations, from the coach's knowledge base.</p>
+        <div id="locations-list"></div>
+      </div>
+
+      <!-- Progress panel -->
+      <div id="panel-progress" class="panel">
+        <div class="panel-header">
+          <h2>📈 Progress vs Goal</h2>
+          <button id="btn-analyze-now">🔍 Analyze Now</button>
+        </div>
+        <div id="goal-summary-card" class="goal-card"></div>
+        <div id="analyze-status" style="display:none"></div>
+        <div class="chart-wrap"><canvas id="prediction-chart" height="220"></canvas></div>
+
+        <h3>Prediction History</h3>
+        <div id="prediction-history-list"></div>
+
+        <h3>Edit Goal</h3>
+        <form id="goal-edit-form" class="goal-form">
+          <label>Aspirational
+            <input id="goal-aspirational" type="text" placeholder="10:30" />
+          </label>
+          <label>Realistic min
+            <input id="goal-realistic-min" type="text" placeholder="10:00" />
+          </label>
+          <label>Realistic max
+            <input id="goal-realistic-max" type="text" placeholder="11:30" />
+          </label>
+          <button type="submit">Save Goal</button>
+        </form>
+      </div>
+
+      <!-- Settings panel -->
+      <div id="panel-settings" class="panel">
+        <div class="panel-header"><h2>⚙️ Settings</h2></div>
+
+        <h3 class="settings-persona-h">🎯 Race &amp; Goal</h3>
+        <p class="course-source">Your target race. Changing the date lets the coach generate a plan toward it.</p>
+        <form id="settings-goal-form" class="goal-form">
+          <label>Race name<input id="sg-name" type="text" placeholder="Skyline 50K"></label>
+          <label>Date<input id="sg-date" type="date"></label>
+          <label>Distance (km)<input id="sg-dist" type="number" inputmode="decimal" placeholder="50"></label>
+          <label>Vert (m)<input id="sg-vert" type="number" inputmode="numeric" placeholder="2400"></label>
+          <label>Goal time<input id="sg-asp" type="text" placeholder="6:30:00"></label>
+          <label>Realistic (fast)<input id="sg-lo" type="text" placeholder="6:15:00"></label>
+          <label>Realistic (slow)<input id="sg-hi" type="text" placeholder="7:00:00"></label>
+          <button type="submit">Save race</button>
+          <span class="settings-status" id="settings-goal-status"></span>
+        </form>
+
+        <h3 class="settings-persona-h">🧑‍🏫 Coach &amp; Dietitian</h3>
+        <p class="course-source">
+          Choose each persona's methodology — keep the generic default, describe what you want and let
+          your AI draft it, or write your own. This shapes how the coach and dietitian advise you.
+        </p>
+        <h3 class="settings-persona-h">🏃 Coach</h3>
+        <div id="settings-coach"></div>
+        <h3 class="settings-persona-h">🥗 Dietitian</h3>
+        <div id="settings-diet"></div>
+        <div>
+          <button class="settings-save" id="settings-save">Save personas</button>
+          <span class="settings-status" id="settings-status"></span>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Bottom nav (mobile only) -->
+  <nav id="bottom-nav">
+    <div class="tab-item active" data-panel="chat"><span class="tab-icon">💬</span><span class="tab-label">Chat</span></div>
+    <div class="tab-item" data-panel="week"><span class="tab-icon">📅</span><span class="tab-label">Week</span></div>
+    <div class="tab-item" data-panel="plan"><span class="tab-icon">📋</span><span class="tab-label">Plan</span></div>
+    <div class="tab-item" data-panel="race"><span class="tab-icon">🏁</span><span class="tab-label">Race</span></div>
+    <div class="tab-item" data-panel="profile"><span class="tab-icon">📊</span><span class="tab-label">Profile</span></div>
+    <div class="tab-item" data-panel="course"><span class="tab-icon">🎥</span><span class="tab-label">Course</span></div>
+    <div class="tab-item" data-panel="trails"><span class="tab-icon">🗺️</span><span class="tab-label">Trails</span></div>
+    <div class="tab-item" data-panel="progress"><span class="tab-icon">📈</span><span class="tab-label">Progress</span></div>
+  </nav>
+
+
+  <script src="/js/vendor/chart.umd.min.js"></script>
+  <script src="/js/persona-editor.js"></script>
+  <script src="/js/onboarding.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+# Render Blueprint — one-click deploy of Trail Coach.
+#
+# Creates a web service + a Postgres database. After it provisions, set the
+# secrets marked `sync: false` in the Render dashboard (your LLM API key and a
+# login password), then open the URL and complete onboarding.
+#
+# To stand up a PUBLIC DEMO instead of a private instance, set SEED_DEMO_DATA=1
+# and use a throwaway APP_PASSWORD (e.g. "demo"). See docs/DEMO.md.
+services:
+  - type: web
+    name: trail-coach
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Session signing key — auto-generated, required in production.
+      - key: SECRET_KEY
+        generateValue: true
+      # Auth: shared password gate (no external account needed).
+      - key: AUTH_MODE
+        value: password
+      - key: APP_PASSWORD
+        sync: false          # set in the dashboard (use "demo" for a public demo)
+      # AI provider — swap for any LiteLLM-supported provider/model.
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: LLM_MODEL
+        value: claude-sonnet-4-6
+      - key: LLM_API_KEY
+        sync: false          # set in the dashboard
+      # Set to "1" to seed a generic demo athlete/goal/course; blank = onboarding.
+      - key: SEED_DEMO_DATA
+        value: ""
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trail-coach-db
+          property: connectionString
+
+databases:
+  - name: trail-coach-db
+    plan: free

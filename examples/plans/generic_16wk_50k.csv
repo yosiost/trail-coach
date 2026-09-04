@@ -1,0 +1,22 @@
+Week,Date,Day,Phase,Session,Distance_km,Vert_m,Duration_min,HR_Zone,RPE,Notes
+W1,2025-01-05,Sun,Base,Rest,0,0,0,,,Full rest day
+W1,2025-01-06,Mon,Base,Easy trail run,8,250,50,Z2,3,Conversational pace
+W1,2025-01-07,Tue,Base,Hill repeats,7,350,55,Z4,7,"6x2min uphill hard, jog down"
+W1,2025-01-08,Wed,Base,Recovery run,6,120,40,Z1,2,Keep it very easy
+W1,2025-01-09,Thu,Base,Incline hike,0,400,75,Z2,4,Treadmill or trail, loaded pack
+W1,2025-01-10,Fri,Base,Rest,0,0,0,,,Optional mobility
+W1,2025-01-11,Sat,Base,Long run,18,700,140,Z2,5,Practice race-rate fueling
+W2,2025-01-12,Sun,Base,Rest,0,0,0,,,Full rest day
+W2,2025-01-13,Mon,Base,Easy trail run,9,280,55,Z2,3,Conversational pace
+W2,2025-01-14,Tue,Base,VO2max intervals,8,300,55,Z5,8,"5x3min hard, 3min jog recovery"
+W2,2025-01-15,Wed,Base,Recovery run,6,120,40,Z1,2,Very easy
+W2,2025-01-16,Thu,Base,Incline hike,0,450,80,Z2,4,Sustained climb simulation
+W2,2025-01-17,Fri,Base,Rest,0,0,0,,,Optional mobility
+W2,2025-01-18,Sat,Base,Long run B2B day 1,20,800,155,Z2,5,Back-to-back weekend
+W3,2025-01-19,Sun,Base,Long run B2B day 2,14,500,110,Z2,5,Run on tired legs
+W3,2025-01-20,Mon,Base,Rest,0,0,0,,,Recovery from B2B
+W3,2025-01-21,Tue,Base,Tempo run,10,300,60,Z3,6,"20min sustained tempo block"
+W3,2025-01-22,Wed,Base,Recovery run,6,120,40,Z1,2,Very easy
+W3,2025-01-23,Thu,Base,Incline hike,0,500,85,Z2,4,Loaded pack
+W3,2025-01-24,Fri,Base,Rest,0,0,0,,,Optional mobility
+W3,2025-01-25,Sat,Base,Long run,24,1000,190,Z2,6,Longest run so far — fuel every 30min
