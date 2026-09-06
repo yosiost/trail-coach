@@ -98,6 +98,7 @@ STRAVA_WEBHOOK_VERIFY_TOKEN = os.environ.get("STRAVA_WEBHOOK_VERIFY_TOKEN", "")
 _context_cache: dict = {"text": None, "expires_at": 0.0}
 _context_lock = threading.Lock()
 _CONTEXT_TTL = 60  # seconds
+_ATHLETE_REFS_CONTEXT_LIMIT = 20  # cap on athlete_references stuffed into the LLM context
 
 
 def _invalidate_context_cache() -> None:
@@ -593,7 +594,7 @@ def build_context() -> str:
         lines.append(f"(could not load coach notes: {e})")
 
     try:
-        refs = get_athlete_references()
+        refs = get_athlete_references(limit=_ATHLETE_REFS_CONTEXT_LIMIT)
         if refs:
             by_cat: dict[str, list] = {}
             for r in refs:

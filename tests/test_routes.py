@@ -35,3 +35,13 @@ def test_logout_clears_session(client):
     client.post("/login", data={"password": "testpw"})
     assert client.get("/logout").status_code == 302
     assert client.get("/api/config/status").status_code == 302   # gated again
+
+
+def test_build_context_caps_athlete_references(client):
+    import server
+    from api import db
+    for i in range(30):
+        db.upsert_athlete_reference("fueling", f"item_{i:02d}", "content")
+    ctx = server.build_context()
+    ref_lines = [ln for ln in ctx.splitlines() if ln.strip().startswith("item_")]
+    assert len(ref_lines) == server._ATHLETE_REFS_CONTEXT_LIMIT

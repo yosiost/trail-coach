@@ -46,3 +46,23 @@ def test_init_goals_seeds_a_future_race():
     db.init_goals()
     g = db.get_active_goal()
     assert date.fromisoformat(g["race_date"]) > date.today()
+
+
+def test_athlete_references_limit_orders_by_recency_and_caps_count():
+    for i in range(25):
+        db.upsert_athlete_reference("fueling", f"item_{i:02d}", "content")
+    all_refs = db.get_athlete_references()
+    assert len(all_refs) == 25
+    assert [r["name"] for r in all_refs] == sorted(r["name"] for r in all_refs)  # alphabetical, unlimited
+
+    capped = db.get_athlete_references(limit=5)
+    assert len(capped) == 5
+    assert [r["name"] for r in capped] == ["item_24", "item_23", "item_22", "item_21", "item_20"]  # most-recent first
+
+
+def test_athlete_references_limit_combines_with_category():
+    db.upsert_athlete_reference("fueling", "gel", "content")
+    db.upsert_athlete_reference("trails", "cell_1", "content")
+    db.upsert_athlete_reference("fueling", "dates", "content")
+    capped = db.get_athlete_references(category="fueling", limit=1)
+    assert len(capped) == 1 and capped[0]["name"] == "dates"  # most recently upserted fueling item

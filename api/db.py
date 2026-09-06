@@ -458,10 +458,21 @@ def init_athlete_references() -> None:
             _run(conn, sql, (category, name, content, now))
 
 
-def get_athlete_references(category: str | None = None) -> list[dict]:
-    if category:
+def get_athlete_references(category: str | None = None, limit: int | None = None) -> list[dict]:
+    """Without `limit`: full set, alphabetical (used by /api/references and the
+    get_athlete_references chat tool — order/completeness both matter there).
+    With `limit`: most-recently-updated first, capped (used by build_context()'s
+    proactive context injection, mirroring get_coach_notes(limit=8)'s cap)."""
+    if limit:
+        if category:
+            sql = f"SELECT category, name, content, updated_at FROM athlete_references WHERE category = {P} ORDER BY updated_at DESC LIMIT {P}"
+            params: tuple = (category, limit)
+        else:
+            sql = f"SELECT category, name, content, updated_at FROM athlete_references ORDER BY updated_at DESC LIMIT {P}"
+            params = (limit,)
+    elif category:
         sql = f"SELECT category, name, content, updated_at FROM athlete_references WHERE category = {P} ORDER BY name"
-        params: tuple = (category,)
+        params = (category,)
     else:
         sql = "SELECT category, name, content, updated_at FROM athlete_references ORDER BY category, name"
         params = ()

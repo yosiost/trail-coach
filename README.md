@@ -91,6 +91,7 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 | `LLM_PROVIDER` / `LLM_MODEL` | Provider slug + model id (e.g. `anthropic` + `claude-sonnet-4-6`, `openai` + `gpt-4o`). |
 | `LLM_API_KEY` | Key for the chosen provider. Falls back to the provider's own env var (e.g. `ANTHROPIC_API_KEY`) if blank. |
 | `LLM_BASE_URL` | For OpenAI-compatible / local endpoints (Ollama, LM Studio, OpenRouter). |
+| `CHAT_HISTORY_WINDOW_MESSAGES` | Most recent chat messages sent to the LLM per turn (default `20`; `0` disables trimming). Full history is still saved for the UI. |
 | `COACH_METHODOLOGY` / `DIETITIAN_METHODOLOGY` | `generic` (default) \| `custom` (with `*_METHODOLOGY_TEXT`). Usually set in-app via onboarding/Settings — including a "describe it, the LLM drafts it" builder — rather than here. |
 | `SECRET_KEY` | Signs session cookies. **Required in production.** |
 | `AUTH_MODE` | `password` (default) \| `oauth` \| `none`. |
@@ -125,6 +126,7 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 ```
 
 - **Provider-agnostic LLM** (`api/llm.py`) — tools are authored once in Anthropic's schema and translated to the OpenAI function-calling format LiteLLM normalizes on, so the same coach runs on any provider.
+- **Efficient by default** — the ~5K-token system prompt/tools/athlete-context prefix is marked for prompt caching (`cache_control`) on providers that support it (Anthropic, OpenAI, Gemini, Bedrock, Deepseek, xAI), so it's billed once per cache window instead of every turn; conversation history sent to the model is capped at `CHAT_HISTORY_WINDOW_MESSAGES` regardless of provider.
 - **Personas as data, not prose** (`api/chat.py`) — the persona prompts are athlete-agnostic; the athlete's profile, HR zones, course, and fueling are injected at request time from the database knowledge base + goal + course JSON. Methodology is a swappable preset.
 - **Your data lives in the DB** — the training plan (CSV) and course (JSON) are stored in `config_blobs`; goals, predictions, fueling, and the athlete knowledge base are first-class tables. Nothing personal is committed to the repo.
 - **Onboarding** (`api/onboarding.py`) — a first-run wizard validates and persists everything, deriving HR zones from your max HR and week boundaries from your week-start day.
