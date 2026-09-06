@@ -25,6 +25,14 @@ import os
 _DEFAULT_PROVIDER = "anthropic"
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
+# Providers LiteLLM documents cache_control (prompt caching) support for. Any
+# other provider (Ollama, a custom OpenAI-compatible LLM_BASE_URL, an
+# unrecognized fully-qualified model, ...) gets today's uncached behavior
+# unchanged — no regression risk for self-hosters on those.
+_CACHE_CONTROL_PROVIDERS = frozenset({
+    "anthropic", "openai", "gemini", "vertex_ai", "bedrock", "deepseek", "xai",
+})
+
 
 def _litellm():
     import litellm
@@ -34,15 +42,27 @@ def _litellm():
     return litellm
 
 
+def resolved_provider() -> str:
+    """The provider slug in effect: parsed from LLM_MODEL if it's already
+    'provider/model', else LLM_PROVIDER (or the default)."""
+    model = os.environ.get("LLM_MODEL", _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
+    if "/" in model:
+        return model.split("/", 1)[0]
+    return os.environ.get("LLM_PROVIDER", _DEFAULT_PROVIDER).strip() or _DEFAULT_PROVIDER
+
+
 def model_string() -> str:
     """Return the LiteLLM 'provider/model' string from env.
 
     If LLM_MODEL already contains a '/', it is used verbatim (lets advanced users
     specify a fully-qualified LiteLLM model id).
     """
-    provider = os.environ.get("LLM_PROVIDER", _DEFAULT_PROVIDER).strip() or _DEFAULT_PROVIDER
     model = os.environ.get("LLM_MODEL", _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
-    return model if "/" in model else f"{provider}/{model}"
+    return model if "/" in model else f"{resolved_provider()}/{model}"
+
+
+def cache_control_enabled() -> bool:
+    return resolved_provider() in _CACHE_CONTROL_PROVIDERS
 
 
 def _auth_kwargs() -> dict:
@@ -75,14 +95,28 @@ def to_openai_tools(tools: list[dict]) -> list[dict]:
 
 
 def system_message(base: str, context: str | None) -> dict:
-    """Build the system message as a single OpenAI-style message.
-
-    Kept as plain text for cross-provider robustness. (Anthropic prompt-caching
-    via cache_control blocks can be layered back in as a provider-conditional
-    optimization later — see roadmap §3.6.)
-    """
+    """Build the system message. Plain string on providers without documented
+    cache_control support (unchanged from before); a single cache_control-marked
+    content block on providers that do, so the ~5K-token system+context prefix
+    (mostly static turn-to-turn) is cached instead of re-billed every request."""
     text = base if not context else f"{base}\n\n{context}"
+    if cache_control_enabled():
+        return {"role": "system", "content": [
+            {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+        ]}
     return {"role": "system", "content": text}
+
+
+def with_cache_control(tools: list[dict]) -> list[dict]:
+    """Mark the last tool with cache_control so the tools+system prefix caches as
+    one block (Anthropic-style caching covers everything up to and including a
+    marked block; capped to a few breakpoints, so mark sparingly). No-op when the
+    provider doesn't support it, or there are no tools."""
+    if not tools or not cache_control_enabled():
+        return tools
+    tools = [dict(t) for t in tools]
+    tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+    return tools
 
 
 def completion(messages: list[dict], tools: list[dict], max_tokens: int, stream: bool = False):

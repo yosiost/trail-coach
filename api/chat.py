@@ -649,6 +649,27 @@ def _format_course_profile() -> str:
     return "\n".join(lines)
 
 
+# Only the most recent N incoming messages are sent to the LLM each turn; full
+# history stays persisted via POST /api/sessions/<id> (server.py) — untouched.
+# Unit = individual messages (user+assistant), not exchanges. 0 disables trimming,
+# consistent with RATE_LIMIT_PER_MIN=0 in api/security.py.
+_HISTORY_WINDOW = int(os.environ.get("CHAT_HISTORY_WINDOW_MESSAGES", "20") or 0)
+
+
+def _windowed(messages: list[dict], limit: int | None = None) -> list[dict]:
+    """Trim to the last `limit` messages. The incoming list is always a clean
+    alternating user/assistant transcript (tool-call rounds live only inside this
+    module's own request-scoped convo and never reach the caller), so the only
+    edge case is a slice landing on a leading orphaned assistant message."""
+    limit = _HISTORY_WINDOW if limit is None else limit
+    if limit <= 0 or len(messages) <= limit:
+        return list(messages)
+    trimmed = messages[-limit:]
+    while trimmed and trimmed[0].get("role") != "user":
+        trimmed = trimmed[1:]
+    return trimmed
+
+
 def build_system(persona: str, context: str | None) -> tuple[str, str | None]:
     """Return (base_prompt, live_context) for the chosen persona."""
     base = PERSONAS.get(persona, SYSTEM_PROMPT)
@@ -718,8 +739,8 @@ def _dispatch_tool(name: str, args: dict) -> tuple[str, dict]:
 
 def chat(messages: list[dict], context: str | None = None, persona: str = "coach") -> dict:
     base, ctx = build_system(persona, context)
-    convo = [llm.system_message(base, ctx)] + list(messages)
-    tools = llm.to_openai_tools(TOOLS)
+    convo = [llm.system_message(base, ctx)] + _windowed(messages)
+    tools = llm.with_cache_control(llm.to_openai_tools(TOOLS))
     plan_updated = goal_updated = fuel_updated = False
 
     while True:
@@ -756,8 +777,8 @@ def chat_stream(
     """Generator yielding SSE-formatted chunks. Streams assistant text; when the
     model calls tools the round is executed and the loop continues."""
     base, ctx = build_system(persona, context)
-    convo = [llm.system_message(base, ctx)] + list(messages)
-    tools = llm.to_openai_tools(TOOLS)
+    convo = [llm.system_message(base, ctx)] + _windowed(messages)
+    tools = llm.with_cache_control(llm.to_openai_tools(TOOLS))
     plan_updated = goal_updated = fuel_updated = False
 
     while True:
