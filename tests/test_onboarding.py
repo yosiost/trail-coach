@@ -60,9 +60,10 @@ def test_complete_sets_onboarded_and_methodology():
 
 
 def test_seed_demo_blobs_is_idempotent():
+    db.create_goal("R", "2026-12-31", 50, 2400, 23400, 22500, 25200)  # active race
     ob.seed_demo_blobs()
-    assert json.loads(db.get_config_blob("course_json"))["race"].startswith("Skyline")
-    assert db.get_config_blob("plan_csv").startswith("Week,")
-    db.set_config_blob("plan_csv", "CUSTOM")
+    assert json.loads(db.get_race_config_blob("course_json"))["race"].startswith("Skyline")
+    assert db.get_race_config_blob("plan_csv").startswith("Week,")
+    db.set_race_config_blob("plan_csv", "CUSTOM")
     ob.seed_demo_blobs()                                   # must not overwrite
-    assert db.get_config_blob("plan_csv") == "CUSTOM"
+    assert db.get_race_config_blob("plan_csv") == "CUSTOM"

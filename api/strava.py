@@ -12,7 +12,10 @@ import urllib.parse
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from api.db import get_plan_overrides, set_plan_overrides, get_config_blob, set_config_blob
+from api.db import (
+    get_plan_overrides, set_plan_overrides, get_config_blob, set_config_blob,
+    get_race_config_blob, set_race_config_blob, get_active_race_id,
+)
 
 # Legacy fallback path. The training plan is stored in the DB
 # (config_blobs['plan_csv']); this local file is only read if that blob is empty
@@ -21,8 +24,9 @@ PLAN_CSV = Path(__file__).parent.parent / "training_plan.csv"
 
 
 def _plan_text() -> str:
-    """Return the training-plan CSV text: DB blob first, else the legacy file."""
-    text = get_config_blob("plan_csv")
+    """Return the active race's training-plan CSV text: DB blob first, else the
+    legacy file."""
+    text = get_race_config_blob("plan_csv")
     if text:
         return text
     if PLAN_CSV.exists():
@@ -39,21 +43,22 @@ def _plan_rows() -> list[dict]:
 
 
 def seed_plan_blob_from_file() -> None:
-    """One-time migration: import the legacy committed plan CSV into the DB if the
-    blob is empty. No-ops once the file is removed (onboarding PR B-2)."""
-    if get_config_blob("plan_csv"):
+    """One-time migration: import the legacy committed plan CSV into the active
+    race's plan blob if empty. No-ops with no active race (fresh install →
+    onboarding) or once the file is removed (onboarding PR B-2)."""
+    if get_active_race_id() is None or get_race_config_blob("plan_csv"):
         return
     try:
         if PLAN_CSV.exists():
-            set_config_blob("plan_csv", PLAN_CSV.read_text(encoding="utf-8"))
-            logging.info("Migrated legacy plan CSV into the DB (config_blobs['plan_csv']).")
+            set_race_config_blob("plan_csv", PLAN_CSV.read_text(encoding="utf-8"))
+            logging.info("Migrated legacy plan CSV into the active race's plan blob.")
     except Exception as e:
         logging.warning("plan blob migration skipped: %s", e)
 
 
 def plan_source() -> str:
     """Where the plan is read from: 'db' | 'file' | 'none' (for status/diagnostics)."""
-    if get_config_blob("plan_csv"):
+    if get_race_config_blob("plan_csv"):
         return "db"
     return "file" if PLAN_CSV.exists() else "none"
 
