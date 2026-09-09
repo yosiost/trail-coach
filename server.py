@@ -31,6 +31,7 @@ from api.db import (
     init_goals, get_active_goal, update_goal, get_predictions, hms_to_sec, sec_to_hms,
     sync_course_data, init_race_fuel, get_race_fuel,
     heal_onboarded_flag, is_onboarded, get_active_race_id,
+    list_races, set_active_race_id, get_goal_by_id, copy_race_data,
 )
 
 app = Flask(__name__, static_folder="frontend", static_url_path="")
@@ -525,6 +526,50 @@ def goal_predictions():
         return jsonify([_serialize_prediction(p) for p in get_predictions(g["id"], limit=limit)])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Races (multi-race: list / switch / create) ───────────────────────────────
+
+@app.get("/api/races")
+@login_required
+def races_list():
+    return jsonify([_serialize_goal(r) for r in list_races()])
+
+
+@app.post("/api/races/<int:race_id>/activate")
+@login_required
+def races_activate(race_id: int):
+    if not get_goal_by_id(race_id):
+        return jsonify({"error": "no such race"}), 404
+    set_active_race_id(race_id)
+    _invalidate_context_cache()
+    return jsonify({"ok": True, "active_race_id": race_id})
+
+
+@app.post("/api/races")
+@login_required
+def races_create():
+    """Create a new race and make it active. Optionally copy-forward the fuel
+    plan and/or training plan from the race that was active before this call."""
+    b = request.json or {}
+    branch_from = get_active_race_id()  # capture BEFORE create_goal switches active
+    try:
+        g = onboarding.persist_goal(
+            race_name=b.get("race_name", ""), race_date=b.get("race_date", ""),
+            distance_km=b.get("distance_km", 0), vert_m=b.get("vert_m", 0),
+            aspirational_time=b.get("aspirational_time", "0:00"),
+            realistic_min_time=b.get("realistic_min_time", "0:00"),
+            realistic_max_time=b.get("realistic_max_time", "0:00"),
+            notes=b.get("notes", ""),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    copy = b.get("copy") or {}
+    if g and branch_from and branch_from != g["id"]:
+        copy_race_data(branch_from, g["id"],
+                       fuel=bool(copy.get("fuel")), plan=bool(copy.get("plan")))
+    _invalidate_context_cache()
+    return jsonify({"ok": True, "goal": _serialize_goal(g) if g else None})
 
 
 def build_context() -> str:

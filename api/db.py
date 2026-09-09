@@ -907,6 +907,30 @@ def get_goal_by_id(goal_id: int) -> dict | None:
         return _fetchone(conn, f"SELECT * FROM goals WHERE id = {P}", (goal_id,))
 
 
+def list_races() -> list[dict]:
+    """Every race (goal), newest first, each flagged with whether it's the one
+    currently in view (active_race_id)."""
+    active = get_active_race_id()
+    with _conn() as conn:
+        rows = _fetchall(conn, "SELECT * FROM goals ORDER BY created_at DESC")
+    for r in rows:
+        r["is_active"] = r["id"] == active
+    return rows
+
+
+def copy_race_data(src_race_id: int, dst_race_id: int, *, fuel: bool = False, plan: bool = False) -> None:
+    """Seed a new race from an existing one (copy-forward on branch). Only the
+    template-like data is copied; the course is left empty to be set per race."""
+    if fuel:
+        segments = get_race_fuel(src_race_id)
+        if segments:
+            set_race_fuel(segments, race_id=dst_race_id)
+    if plan:
+        csv_text = get_race_config_blob("plan_csv", src_race_id)
+        if csv_text:
+            set_race_config_blob("plan_csv", csv_text, race_id=dst_race_id)
+
+
 _GOAL_FIELDS = {
     "race_name", "race_date", "distance_km", "vert_m",
     "aspirational_time_sec", "realistic_min_sec", "realistic_max_sec",

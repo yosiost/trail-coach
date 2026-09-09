@@ -17,6 +17,26 @@ function switchPanel(target) {
   if (target === "settings" && !settingsLoaded) renderSettings();
 }
 
+// ── Race switching: reset every race-scoped view and reload ───────
+// Called after the active race changes (races.js). All race-scoped panels are
+// driven by lazy-load guards + cached data; clearing them makes each refetch.
+async function reloadForActiveRace() {
+  weekLoaded = planLoaded = raceLoaded = profileLoaded = courseLoaded = trailsLoaded = false;
+  settingsLoaded = false;
+  COURSE_DATA = null; COURSE_STORY = []; RACE_ELEVATION = [];
+  planRows = []; lastWeekData = null;
+
+  // Chat threads are per-race — reload the list and open the newest (or a blank).
+  await loadSessionsList();
+  if (_sessions.length > 0) switchSession(_sessions[0].id);
+  else newChat();
+
+  await loadGoal().then(syncRaceTargetTime);
+
+  const active = document.querySelector(".panel.active");
+  if (active) switchPanel(active.id.replace("panel-", ""));
+}
+
 // ── Profile: course facts + cutoffs (data-driven from /api/course) ──
 let profileLoaded = false;
 async function renderProfile() {
@@ -874,6 +894,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   loadGoal().then(syncRaceTargetTime);
+  if (typeof loadRaces === "function") loadRaces();
 
   inputEl.focus();
 });
