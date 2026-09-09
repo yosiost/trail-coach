@@ -9,6 +9,7 @@ from api.db import (
     add_coach_note, get_athlete_references, upsert_athlete_reference,
     get_active_goal, update_goal, save_prediction, get_predictions,
     get_race_fuel, set_race_fuel, get_config_blob, set_config_blob,
+    get_race_config_blob, set_race_config_blob, get_active_race_id,
     hms_to_sec, sec_to_hms,
 )
 import logging
@@ -577,7 +578,7 @@ def load_course() -> dict | None:
     DB blob (config_blobs['course_json']) first, else the legacy committed file.
     Returns None if neither is present/parseable.
     """
-    blob = get_config_blob("course_json")
+    blob = get_race_config_blob("course_json")
     if blob:
         try:
             return json.loads(blob)
@@ -590,21 +591,22 @@ def load_course() -> dict | None:
 
 
 def seed_course_blob_from_file() -> None:
-    """One-time migration: import the legacy committed course JSON into the DB if
-    the blob is empty. No-ops once the file is removed (onboarding PR B-2)."""
-    if get_config_blob("course_json"):
+    """One-time migration: import the legacy committed course JSON into the active
+    race's course blob if empty. No-ops with no active race (fresh install →
+    onboarding) or once the file is removed (onboarding PR B-2)."""
+    if get_active_race_id() is None or get_race_config_blob("course_json"):
         return
     try:
         if _COURSE_JSON_PATH.exists():
-            set_config_blob("course_json", _COURSE_JSON_PATH.read_text(encoding="utf-8"))
-            logging.info("Migrated legacy course JSON into the DB (config_blobs['course_json']).")
+            set_race_config_blob("course_json", _COURSE_JSON_PATH.read_text(encoding="utf-8"))
+            logging.info("Migrated legacy course JSON into the active race's course blob.")
     except Exception as e:
         logging.warning("course blob migration skipped: %s", e)
 
 
 def course_source() -> str:
     """Where the course is read from: 'db' | 'file' | 'none' (for status/diagnostics)."""
-    if get_config_blob("course_json"):
+    if get_race_config_blob("course_json"):
         return "db"
     return "file" if _COURSE_JSON_PATH.exists() else "none"
 

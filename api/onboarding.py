@@ -15,6 +15,7 @@ from pathlib import Path
 
 from api.db import (
     upsert_athlete_reference, set_config_blob, get_config_blob,
+    get_race_config_blob, set_race_config_blob,
     create_goal, hms_to_sec,
 )
 
@@ -172,13 +173,13 @@ def persist_goal(race_name: str, race_date: str, distance_km, vert_m,
 
 def persist_plan(csv_text: str) -> int:
     rows = validate_plan_csv(csv_text)
-    set_config_blob("plan_csv", csv_text)
+    set_race_config_blob("plan_csv", csv_text)
     return len(rows)
 
 
 def persist_course(course: dict) -> None:
     validate_course(course)
-    set_config_blob("course_json", json.dumps(course))
+    set_race_config_blob("course_json", json.dumps(course))
 
 
 _VALID_METHODOLOGY = {"generic", "custom"}
@@ -188,14 +189,14 @@ _VALID_ACTIVITY = {"manual", "strava", "garmin"}
 def seed_demo_blobs() -> None:
     """Demo mode: seed the example plan + course into config_blobs if unset, so a
     SEED_DEMO_DATA instance has a populated plan and course (not just a goal)."""
-    if not get_config_blob("plan_csv"):
+    if not get_race_config_blob("plan_csv"):
         plans = list_examples()["plans"]
         if plans:
-            set_config_blob("plan_csv", load_example_plan(plans[0]))
-    if not get_config_blob("course_json"):
+            set_race_config_blob("plan_csv", load_example_plan(plans[0]))
+    if not get_race_config_blob("course_json"):
         courses = list_examples()["courses"]
         if courses:
-            set_config_blob("course_json", json.dumps(load_example_course(courses[0])))
+            set_race_config_blob("course_json", json.dumps(load_example_course(courses[0])))
 
 
 def complete(activity_source: str = "manual", methodology: str = "generic",

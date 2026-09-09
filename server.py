@@ -30,7 +30,7 @@ from api.db import (
     list_sessions, get_session, upsert_session, delete_session,
     init_goals, get_active_goal, update_goal, get_predictions, hms_to_sec, sec_to_hms,
     sync_course_data, init_race_fuel, get_race_fuel,
-    heal_onboarded_flag, is_onboarded,
+    heal_onboarded_flag, is_onboarded, get_active_race_id,
 )
 
 app = Flask(__name__, static_folder="frontend", static_url_path="")
@@ -58,8 +58,8 @@ init_db()  # always: create tables
 # fresh install starts empty and goes through onboarding instead of inheriting
 # a set of default athlete/goal/course data.
 if os.environ.get("SEED_DEMO_DATA", "").strip().lower() in ("1", "true", "yes", "on"):
+    init_goals()  # first: creates the active race the race-scoped seeds hang off
     init_athlete_references()
-    init_goals()
     init_race_fuel()
     sync_course_data()  # heal seeded DBs when course facts change
     onboarding.seed_demo_blobs()  # example plan + course so the demo isn't empty
@@ -95,7 +95,7 @@ def _save_cache(data: dict) -> None:
 _activity_cache: dict = _load_cache()
 STRAVA_WEBHOOK_VERIFY_TOKEN = os.environ.get("STRAVA_WEBHOOK_VERIFY_TOKEN", "")
 
-_context_cache: dict = {"text": None, "expires_at": 0.0}
+_context_cache: dict = {"text": None, "expires_at": 0.0, "race_id": None}
 _context_lock = threading.Lock()
 _CONTEXT_TTL = 60  # seconds
 _ATHLETE_REFS_CONTEXT_LIMIT = 20  # cap on athlete_references stuffed into the LLM context
@@ -107,12 +107,18 @@ def _invalidate_context_cache() -> None:
 
 
 def get_cached_context() -> str:
+    # Keyed by the active race so switching races never serves another race's
+    # cached context, even within the TTL.
+    rid = get_active_race_id()
     with _context_lock:
-        if time.monotonic() < _context_cache["expires_at"] and _context_cache["text"] is not None:
+        if (time.monotonic() < _context_cache["expires_at"]
+                and _context_cache["text"] is not None
+                and _context_cache["race_id"] == rid):
             return _context_cache["text"]
     text = build_context()
     with _context_lock:
         _context_cache["text"] = text
+        _context_cache["race_id"] = rid
         _context_cache["expires_at"] = time.monotonic() + _CONTEXT_TTL
     return text
 

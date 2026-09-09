@@ -12,7 +12,10 @@ import io
 import json
 from datetime import date, timedelta
 
-from api.db import get_active_goal, get_athlete_references, get_config_blob, set_config_blob
+from api.db import (
+    get_active_goal, get_athlete_references, get_config_blob, set_config_blob,
+    get_race_config_blob, set_race_config_blob,
+)
 
 # 3-letter keys so both "Mon" and "Monday" (and the week_start config) resolve.
 _WEEKDAY = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -175,7 +178,7 @@ def generate_plan() -> dict:
     weeks_n = min((total_days // 7) + 1, _MAX_WEEKS)
 
     course = None
-    blob = get_config_blob("course_json")
+    blob = get_race_config_blob("course_json")
     if blob:
         try:
             course = json.loads(blob)
@@ -200,6 +203,6 @@ def generate_plan() -> dict:
     row_count = csv_text.count("\n") - 1
     if row_count < 1:
         raise ValueError("The generated plan had no sessions — try again.")
-    set_config_blob("plan_csv", csv_text)
+    set_race_config_blob("plan_csv", csv_text)
     return {"weeks": len(weeks), "sessions": row_count,
             "start": plan_start.isoformat(), "race_date": goal["race_date"]}

@@ -33,7 +33,8 @@ def test_week_start_default_sunday_then_monday():
 
 
 def test_plan_reads_from_db_blob():
-    db.set_config_blob("plan_csv", _PLAN)
+    db.create_goal("R", "2026-12-31", 20, 600, 7200, 7000, 8000)  # active race
+    db.set_race_config_blob("plan_csv", _PLAN)
     weeks = strava.get_all_weeks()
     assert len(weeks) == 1 and weeks[0]["week_num"] == "W1"
     rows = strava.read_plan(date(2026, 3, 1), date(2026, 3, 8))
@@ -41,7 +42,8 @@ def test_plan_reads_from_db_blob():
 
 
 def test_this_week_renders_plan_without_strava():
-    db.set_config_blob("plan_csv", _PLAN)
+    db.create_goal("R", "2026-12-31", 20, 600, 7200, 7000, 8000)  # active race
+    db.set_race_config_blob("plan_csv", _PLAN)
     week = strava.get_this_week(week_start=date(2026, 3, 2), injected_activities=[])
     assert {"Easy", "Long"} <= {r["session"] for r in week["rows"]}
     assert week["summary"]["plan_km"] == 28      # 8 + 20, no Strava needed
