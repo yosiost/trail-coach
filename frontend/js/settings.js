@@ -38,6 +38,7 @@ async function loadSettingsGoal() {
 }
 
 async function renderSettings() {
+  if (typeof loadRaces === "function") loadRaces();
   await loadSettingsGoal();
   let cfg = { coach: { mode: "generic", text: "" }, dietitian: { mode: "generic", text: "" } };
   try { cfg = await (await fetch("/api/persona/config")).json(); } catch (e) { /* use defaults */ }
