@@ -234,6 +234,7 @@ def init_db() -> None:
             except sqlite3.OperationalError:
                 pass  # column already exists
         _migrate_multi_race(conn)
+        _migrate_custom_named_course_refs(conn)
 
 
 # ── Multi-race migration ──────────────────────────────────────────────────────
@@ -244,11 +245,20 @@ def init_db() -> None:
 # other race-scoped tables always carry the owning race's id.
 
 # (category, name) reference rows that belong to a race rather than the athlete.
+# A name also counts when it ends in "_<name>" (e.g. "occ_course_profile"), so
+# race-prefixed course notes the coach writes stay with their race.
 _RACE_SCOPED_REFS = {("trails", "course_profile"), ("fueling", "aid_stations")}
 _SHARED_RACE_ID = 0  # athlete_references sentinel for athlete-level (shared) rows
 
 # config_blobs keys that are race-scoped; stored under "<key>:<race_id>".
 _RACE_CONFIG_KEYS = ("course_json", "plan_csv")
+
+
+def _is_race_scoped_ref(category: str, name: str) -> bool:
+    return any(
+        category == c and (name == n or name.endswith(f"_{n}"))
+        for c, n in _RACE_SCOPED_REFS
+    )
 
 
 def _table_columns(conn, table: str) -> set[str]:
@@ -356,6 +366,46 @@ def _migrate_multi_race(conn) -> None:
             f"ON CONFLICT (key) DO NOTHING",
             ("active_race_id", str(r0), now),
         )
+
+
+def _migrate_custom_named_course_refs(conn) -> None:
+    """One-time fix: the multi-race migration matched race-scoped refs by exact
+    name, so custom-named ones (e.g. trails/occ_course_profile) landed in the
+    shared bucket and leaked into every race. Move each to the race that was
+    current when it was last written (latest goal created at or before its
+    updated_at; else the oldest goal). Skips a row whose target already has a
+    same-named row, rather than overwrite it."""
+    flag = "migrated_custom_course_refs"
+    if _fetchone(conn, f"SELECT 1 FROM config_blobs WHERE key = {P}", (flag,)):
+        return
+    goals = _fetchall(conn, "SELECT id, created_at FROM goals ORDER BY created_at")
+    if goals:
+        rows = _fetchall(
+            conn,
+            f"SELECT id, category, name, updated_at FROM athlete_references WHERE race_id = {P}",
+            (_SHARED_RACE_ID,),
+        )
+        for r in rows:
+            if (r["category"], r["name"]) in _RACE_SCOPED_REFS:
+                continue  # exact names were handled by _migrate_multi_race
+            if not _is_race_scoped_ref(r["category"], r["name"]):
+                continue
+            before = [g for g in goals if g["created_at"] <= r["updated_at"]]
+            target = (before[-1] if before else goals[0])["id"]
+            clash = _fetchone(
+                conn,
+                f"SELECT 1 FROM athlete_references WHERE race_id = {P} AND category = {P} AND name = {P}",
+                (target, r["category"], r["name"]),
+            )
+            if not clash:
+                _run(conn, f"UPDATE athlete_references SET race_id = {P} WHERE id = {P}", (target, r["id"]))
+    now = datetime.now(timezone.utc).isoformat()
+    _run(
+        conn,
+        f"INSERT INTO config_blobs (key, value, updated_at) VALUES ({P},{P},{P}) "
+        f"ON CONFLICT (key) DO NOTHING",
+        (flag, "true", now),
+    )
 
 
 def _migrate_table_race_id(
@@ -655,7 +705,7 @@ _ALWAYS_REFRESH_REFERENCES = {
 def _ref_race_id(category: str, name: str, race_id: int | None) -> int:
     """Which race_id a reference row lives under: the active race for race-scoped
     facts (course_profile, aid_stations), else the shared sentinel."""
-    if (category, name) not in _RACE_SCOPED_REFS:
+    if not _is_race_scoped_ref(category, name):
         return _SHARED_RACE_ID
     rid = race_id if race_id is not None else get_active_race_id()
     return rid if rid is not None else _SHARED_RACE_ID
