@@ -119,3 +119,25 @@ def test_references_split_shared_vs_race_scoped():
     db.upsert_athlete_reference("fueling", "aid_stations", "A aid")
     db.set_active_race_id(b)
     assert db.get_athlete_references(category="fueling")[0]["content"] == "B aid"  # unchanged
+
+
+def test_custom_named_course_ref_is_race_scoped():
+    a, b = _two_races()                                   # active = B
+    db.upsert_athlete_reference("trails", "occ_course_profile", "B course")
+    db.set_active_race_id(a)
+    names_a = {r["name"] for r in db.get_athlete_references()}
+    assert "occ_course_profile" not in names_a            # B's course note does not leak to A
+
+
+def test_migration_moves_leaked_custom_course_ref_to_its_race():
+    a, b = _two_races()
+    with db._conn() as conn:                              # simulate pre-fix state: leaked into shared bucket
+        db._run(conn,
+                "INSERT INTO athlete_references (race_id, category, name, content, updated_at) "
+                "VALUES (0, 'trails', 'occ_course_profile', 'A course', '2000-01-01')")
+        db._run(conn, "DELETE FROM config_blobs WHERE key = 'migrated_custom_course_refs'")
+    db.init_db()
+    db.set_active_race_id(b)
+    assert "occ_course_profile" not in {r["name"] for r in db.get_athlete_references()}
+    db.set_active_race_id(a)                              # predates both races -> oldest race
+    assert "occ_course_profile" in {r["name"] for r in db.get_athlete_references()}
