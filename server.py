@@ -14,7 +14,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from datetime import date, timedelta
 from api.strava import (
     get_this_week, get_full_plan, fetch_activities, week_bounds, get_all_weeks,
-    seed_plan_blob_from_file, plan_source,
+    seed_plan_blob_from_file, plan_source, activity_source,
 )
 from api.chat import (
     chat as ai_chat, chat_stream as ai_chat_stream, load_course,
@@ -95,6 +95,10 @@ def _save_cache(data: dict) -> None:
 
 _activity_cache: dict = _load_cache()
 STRAVA_WEBHOOK_VERIFY_TOKEN = os.environ.get("STRAVA_WEBHOOK_VERIFY_TOKEN", "")
+# Garmin's Personal API is pull-only (no webhook), so the current week's cache is
+# re-fetched once it is older than this. Strava keeps using its webhook.
+ACTIVITY_POLL_SECONDS = int(os.environ.get("ACTIVITY_POLL_SECONDS", "900"))
+_refresh_lock = threading.Lock()
 
 _context_cache: dict = {"text": None, "expires_at": 0.0, "race_id": None}
 _context_lock = threading.Lock()
@@ -154,6 +158,8 @@ def strava_webhook_event():
             logging.info("Webhook: this_week fetched %d activities, error=%s", len(this_week), err)
             _activity_cache["this_week"] = this_week
             _activity_cache["refreshed_at"] = date.today().isoformat()
+            _activity_cache["refreshed_ts"] = time.time()
+            _activity_cache["week_start"] = start.isoformat()
             _save_cache(_activity_cache)
             _invalidate_context_cache()
             logging.info("Webhook: cache saved OK")
@@ -172,19 +178,41 @@ def weeks_list():
 
 
 def _refresh_cache_now() -> str | None:
-    """Fetch fresh activities from Strava, update cache, return error string or None."""
+    """Fetch fresh activities from the configured source, update cache, return
+    error string or None. A failed fetch keeps the previous activities (it only
+    stamps the time, so polling backs off instead of retrying every request)."""
     try:
         start, end = week_bounds(False)
         logging.info("Force-refresh: fetching this-week activities %s – %s", start, end)
         this_week, err = fetch_activities(start, end)
         logging.info("Force-refresh: fetched %d activities, error=%s", len(this_week), err)
-        _activity_cache["this_week"] = this_week
-        _activity_cache["refreshed_at"] = date.today().isoformat()
+        same_week = _activity_cache.get("week_start") == start.isoformat()
+        if not (err and same_week):
+            _activity_cache["this_week"] = this_week
+            _activity_cache["refreshed_at"] = date.today().isoformat()
+            _activity_cache["week_start"] = start.isoformat()
+        _activity_cache["refreshed_ts"] = time.time()
         _save_cache(_activity_cache)
         return err
     except Exception as e:
         logging.exception("Force-refresh failed: %s", e)
         return str(e)
+
+
+def _refresh_if_stale() -> None:
+    """Poll a pull-only source (Garmin) when the current-week cache is older
+    than ACTIVITY_POLL_SECONDS or belongs to a previous week."""
+    if activity_source() != "garmin":
+        return
+    current_start = week_bounds(False)[0].isoformat()
+    def stale() -> bool:
+        return (_activity_cache.get("week_start") != current_start
+                or time.time() - _activity_cache.get("refreshed_ts", 0) > ACTIVITY_POLL_SECONDS)
+    if not stale():
+        return
+    with _refresh_lock:
+        if stale():  # another request may have refreshed while we waited
+            _refresh_cache_now()
 
 
 @app.get("/api/week")
@@ -203,6 +231,8 @@ def week():
         if force and is_current:
             logging.info("Force-refresh requested for current week")
             _refresh_cache_now()
+        elif is_current:
+            _refresh_if_stale()
         cached = _activity_cache.get("this_week") if is_current else None
         logging.info("week endpoint: start=%s force=%s is_current=%s cache_hit=%s cache_size=%s",
                      start_str, force, is_current, cached is not None, len(cached) if cached else 0)
@@ -217,6 +247,8 @@ def week():
         key = "next_week" if next_week_flag else "this_week"
         if force and not next_week_flag:
             _refresh_cache_now()
+        elif not next_week_flag:
+            _refresh_if_stale()
         cached_activities = _activity_cache.get(key)  # always use cache after refresh
         logging.info("week endpoint (legacy): next=%s force=%s cache_size=%s",
                      next_week_flag, force, len(cached_activities) if cached_activities else 0)
@@ -573,6 +605,7 @@ def races_create():
 
 
 def build_context() -> str:
+    _refresh_if_stale()
     cached_activities = _activity_cache.get("this_week")
     lines = [f"Today: {date.today().isoformat()}"]
     if _activity_cache.get("refreshed_at"):

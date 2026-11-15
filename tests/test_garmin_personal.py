@@ -63,7 +63,7 @@ def test_token_exchange_and_normalized_activity(fake):
     assert token_req.get_header("Authorization") == "ApiKey k123"
     assert search_req.get_header("Authorization").startswith("Bearer h.")
     q = parse_qs(urlparse(search_req.full_url).query)
-    assert q["startDate"] == ["2026-01-01"] and q["endDate"] == ["2026-01-08"]
+    assert q["startDate"] == ["2026-01-01"] and q["endDate"] == ["2026-01-07"]
     assert acts == [{
         "id": 1, "date": "2026-01-03", "name": "Run 1", "type": "trail_running",
         "distance_km": 12.3, "elev_gain_m": 512, "duration_min": 60.0,
@@ -105,3 +105,52 @@ def test_401_reports_key_problem(monkeypatch):
     monkeypatch.setattr(garmin_personal.urllib.request, "urlopen", urlopen)
     acts, err = garmin_personal.fetch_activities(date(2026, 1, 1), date(2026, 1, 7))
     assert acts == [] and "Personal API key" in err
+
+
+# ── Server-side polling (Garmin has no webhook) ─────────────────────────────
+
+@pytest.fixture
+def srv(monkeypatch):
+    import server
+    calls = []
+    def fake_fetch(start, end):
+        calls.append((start, end))
+        return [{"id": len(calls)}], None
+    monkeypatch.setattr(server, "fetch_activities", fake_fetch)
+    monkeypatch.setattr(server, "_save_cache", lambda d: None)
+    monkeypatch.setattr(server, "_activity_cache", {})
+    monkeypatch.setattr(server, "activity_source", lambda: "garmin")
+    return server, calls
+
+
+def test_poll_refreshes_when_empty_then_respects_ttl(srv):
+    server, calls = srv
+    server._refresh_if_stale()
+    server._refresh_if_stale()
+    assert len(calls) == 1 and server._activity_cache["this_week"] == [{"id": 1}]
+
+
+def test_poll_refreshes_after_ttl_or_week_rollover(srv):
+    server, calls = srv
+    server._refresh_if_stale()
+    server._activity_cache["refreshed_ts"] -= server.ACTIVITY_POLL_SECONDS + 1
+    server._refresh_if_stale()
+    assert len(calls) == 2
+    server._activity_cache["week_start"] = "2000-01-02"   # cache from an old week
+    server._refresh_if_stale()
+    assert len(calls) == 3
+
+
+def test_poll_skipped_for_strava_webhook_source(srv, monkeypatch):
+    server, calls = srv
+    monkeypatch.setattr(server, "activity_source", lambda: "strava")
+    server._refresh_if_stale()
+    assert calls == []
+
+
+def test_failed_refresh_keeps_previous_activities(srv, monkeypatch):
+    server, calls = srv
+    server._refresh_if_stale()
+    monkeypatch.setattr(server, "fetch_activities", lambda s, e: ([], "Garmin rate limited"))
+    assert server._refresh_cache_now() == "Garmin rate limited"
+    assert server._activity_cache["this_week"] == [{"id": 1}]
