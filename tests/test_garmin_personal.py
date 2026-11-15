@@ -154,3 +154,78 @@ def test_failed_refresh_keeps_previous_activities(srv, monkeypatch):
     monkeypatch.setattr(server, "fetch_activities", lambda s, e: ([], "Garmin rate limited"))
     assert server._refresh_cache_now() == "Garmin rate limited"
     assert server._activity_cache["this_week"] == [{"id": 1}]
+
+
+# ── Activity breakdown (split summaries stand in for laps) ───────────────────
+
+def _breakdown_fake(monkeypatch, detail, listed):
+    monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "k123")
+    garmin_personal._token_cache.clear()
+    urls = []
+    def urlopen(req, timeout=None):
+        urls.append(req.full_url)
+        if req.full_url.endswith(garmin_personal.TOKEN_PATH):
+            return _Resp(_jwt(9_999_999_999).encode())
+        if garmin_personal.SEARCH_PATH in req.full_url:
+            return _Resp(json.dumps(listed).encode())
+        return _Resp(json.dumps(detail).encode())
+    monkeypatch.setattr(garmin_personal.urllib.request, "urlopen", urlopen)
+    return urls
+
+
+_DETAIL = {
+    "activityId": 42,
+    "summaryDTO": {"startTimeLocal": "2026-01-03T07:00:00.0"},
+    "splitSummaries": [
+        {"splitType": "INTERVAL_REST", "noOfSplits": 6, "distance": 1200, "duration": 720,
+         "averageHR": 128, "maxHR": 140},
+        {"splitType": "INTERVAL_ACTIVE", "noOfSplits": 6, "distance": 6000, "duration": 1500,
+         "movingDuration": 1490, "elevationGain": 40, "elevationLoss": 38, "averageHR": 162, "maxHR": 175},
+        {"splitType": "TIMING_GATE", "noOfSplits": 1, "distance": 0, "duration": 5},
+    ],
+}
+
+
+def test_breakdown_orders_splits_and_adds_zone_times(monkeypatch):
+    listed = [_act(41, "2026-01-03"), _act(42, "2026-01-03", lapCount=13,
+              hrTimeInZone_1=60, hrTimeInZone_2=600, hrTimeInZone_3=300,
+              hrTimeInZone_4=900, hrTimeInZone_5=120)]
+    urls = _breakdown_fake(monkeypatch, _DETAIL, listed)
+    b = garmin_personal.fetch_activity_breakdown(42)
+    assert urls[1].endswith("/activity-service/activity/42")          # no stray "?"
+    q = parse_qs(urlparse(urls[2]).query)
+    assert q["startDate"] == q["endDate"] == ["2026-01-03"]
+    assert [s["type"] for s in b["splits"]] == ["INTERVAL_ACTIVE", "INTERVAL_REST", "TIMING_GATE"]
+    work = b["splits"][0]
+    assert (work["label"], work["count"], work["distance_km"], work["duration_min"]) == ("work intervals", 6, 6.0, 24.8)
+    assert work["pace_min_km"] == 4.14 and work["avg_hr"] == 162 and work["elev_loss_m"] == 38
+    assert b["splits"][2]["pace_min_km"] is None and b["splits"][2]["label"] == "timing gate"
+    assert b["hr_zone_min"] == [1.0, 10.0, 5.0, 15.0, 2.0] and b["lap_count"] == 13
+
+
+def test_breakdown_without_list_match_or_splits(monkeypatch):
+    _breakdown_fake(monkeypatch, {"summaryDTO": {"startTimeLocal": "2026-01-03T07:00:00"}}, [])
+    assert garmin_personal.fetch_activity_breakdown(42) == {"splits": [], "hr_zone_min": None, "lap_count": None}
+
+
+def test_breakdown_404(monkeypatch):
+    monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "k")
+    garmin_personal._token_cache["access_token"] = "t"
+    garmin_personal._token_cache["expires_at"] = 9_999_999_999
+    def urlopen(req, timeout=None):
+        raise OSError("HTTP Error 404: Not Found")
+    monkeypatch.setattr(garmin_personal.urllib.request, "urlopen", urlopen)
+    assert garmin_personal.fetch_activity_breakdown(7) == {"error": "Garmin has no activity 7"}
+
+
+def test_laps_tool_formats_garmin_breakdown(monkeypatch):
+    from api import chat
+    listed = [_act(42, "2026-01-03", lapCount=13, hrTimeInZone_1=60, hrTimeInZone_2=0,
+                   hrTimeInZone_3=0, hrTimeInZone_4=0, hrTimeInZone_5=0)]
+    _breakdown_fake(monkeypatch, _DETAIL, listed)
+    out = chat._handle_get_activity_laps(42)
+    assert "13 laps recorded" in out
+    assert "work intervals ×6: 6.0km 24.8min 4.14min/km +40/-38m avg 162bpm" in out
+    assert "per split ≈ 1.0km 4.1min" in out
+    assert "HR time in zone (min): Z1 1.0 · Z2 0.0" in out
+    assert chat._handle_get_activity_laps("x") == "Error: invalid activity_id"
