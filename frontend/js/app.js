@@ -636,7 +636,7 @@ async function loadPlan() {
 const btnGeneratePlan = document.getElementById("btn-generate-plan");
 if (btnGeneratePlan) btnGeneratePlan.addEventListener("click", async () => {
   const status = document.getElementById("plan-gen-status");
-  if (!confirm("Generate a training plan from your goal race? This replaces any existing plan.")) return;
+  if (!confirm("Generate a training plan from your goal race? This replaces the plan from its start week to race day; earlier weeks are kept.")) return;
   btnGeneratePlan.disabled = true;
   const label = btnGeneratePlan.textContent;
   btnGeneratePlan.textContent = "Generating…";
@@ -648,7 +648,7 @@ if (btnGeneratePlan) btnGeneratePlan.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Generation failed");
     status.style.color = "var(--done)";
-    status.textContent = `Done — ${data.weeks} weeks, ${data.sessions} sessions. Loading…`;
+    status.textContent = `Done — ${data.weeks} weeks from ${data.start}, ${data.sessions} sessions. Loading…`;
     planLoaded = false; weekLoaded = false; raceLoaded = false;  // refresh dependent views
     await loadPlan();
     await populateWeekSelect();
