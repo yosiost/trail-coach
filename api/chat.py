@@ -120,7 +120,7 @@ The athlete's profile, HR-data caveats, and locale are in the "Athlete knowledge
 1. Call get_goal for the current race goal and target times (aspirational + realistic band).
 2. Call get_prediction_history (limit ~10) to see prior predictions and how the trend has moved.
 3. Read the "Full plan weekly volume" section in Live training data below — it lists each week's start date as (start:YYYY-MM-DD). Call get_week_data for the last 4 completed weeks (including the current week) using those exact dates.
-4. For key quality sessions (VO2max intervals, long runs) in those weeks, call get_activity_laps on the strava_id shown — never judge a session by its overall average.
+4. For key quality sessions (VO2max intervals, long runs) in those weeks, call get_activity_laps on the activity_id shown — never judge a session by its overall average.
 5. Weigh: volume/vert completion % vs plan, quality-session execution (RPE-based — HR may be unreliable), long-run specificity to the race profile (vert rate, duration, terrain), and week-to-week consistency.
 6. Compare all of that against the goal's aspirational/realistic band and the prior-prediction trend.
 7. ALWAYS end your analysis by calling save_race_prediction with a predicted_time, confidence_low/confidence_high band, a verdict of exactly "ahead", "on-track", or "behind", and reasoning that cites specific signals (not vague commentary).
@@ -163,15 +163,15 @@ TOOLS = [
     {
         "name": "get_activity_laps",
         "description": (
-            "Get lap-by-lap breakdown (distance, elevation, HR, zone) for a specific Strava activity. "
-            "Use the strava_id shown in the training context for completed sessions."
+            "Get lap-by-lap breakdown (distance, elevation, HR, zone) for a specific activity. "
+            "Use the activity_id shown in the training context for completed sessions."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "activity_id": {
                     "type": "integer",
-                    "description": "Strava activity ID (shown as strava_id in context)",
+                    "description": "Activity ID (shown as activity_id in context)",
                 }
             },
             "required": ["activity_id"],
@@ -379,7 +379,7 @@ def _handle_get_week_data(week_start_str: str) -> str:
             actual = ""
             if r["actual"]:
                 a = r["actual"]
-                sid = f" [strava_id:{a['id']}]" if a.get("id") else ""
+                sid = f" [activity_id:{a['id']}]" if a.get("id") else ""
                 actual = (
                     f" → actual: {a['distance_km']}km {a['elev_gain_m']}m↑ "
                     f"{a['duration_min']}min avg {a['avg_hr']}bpm ({a['zone']}){sid}"

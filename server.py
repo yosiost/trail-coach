@@ -597,13 +597,13 @@ def build_context() -> str:
         s = week["summary"]
         lines.append(f"Week progress: {s['done_km']}/{s['plan_km']} km, {s['done_vert']}/{s['plan_vert']}m↑ ({s['pct']}%)")
         lines.append("")
-        lines.append("Sessions this week (use strava_id with get_activity_laps for lap detail):")
+        lines.append("Sessions this week (use activity_id with get_activity_laps for lap detail):")
         for r in week["rows"]:
             status = r["status"]
             planned = f"{r['planned_km']}km {r['planned_vert']}m↑ {r['planned_zone']}"
             actuals_str = ""
             for a in r.get("actuals", [r["actual"]] if r.get("actual") else []):
-                sid = f" [strava_id:{a['id']}]" if a.get("id") else ""
+                sid = f" [activity_id:{a['id']}]" if a.get("id") else ""
                 actuals_str += f" → {a['distance_km']}km {a['elev_gain_m']}m↑ {a['duration_min']}min avg {a['avg_hr']}bpm ({a['zone']}){sid}"
             lines.append(f"  {r['day']} [{status.upper()}] {r['session']} | planned: {planned}{actuals_str}")
     except Exception as e:

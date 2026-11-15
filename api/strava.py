@@ -1,4 +1,5 @@
-"""Strava API client — replaces Garmin integration for activity fetching."""
+"""Activity fetching (Strava, or the Garmin Personal API when configured) plus
+the plan/week engine."""
 from __future__ import annotations
 
 import csv
@@ -145,7 +146,23 @@ def _get_access_token() -> str:
     return data["access_token"]
 
 
+def activity_source() -> str:
+    """Which configured source supplies completed activities. The official
+    Garmin Personal API wins when its key is set; Strava is the fallback."""
+    from api import garmin_personal
+    if garmin_personal.garmin_personal_configured():
+        return "garmin"
+    return "strava" if strava_configured() else "none"
+
+
 def fetch_activities(start: date, end: date) -> tuple[list[dict], str | None]:
+    if activity_source() == "garmin":
+        from api import garmin_personal
+        return garmin_personal.fetch_activities(start, end)
+    return _fetch_strava_activities(start, end)
+
+
+def _fetch_strava_activities(start: date, end: date) -> tuple[list[dict], str | None]:
     if not strava_configured():
         return [], None  # optional integration — render the plan without actuals
     try:
@@ -373,6 +390,8 @@ def get_full_plan() -> list[dict]:
 
 def fetch_activity_laps(activity_id: int) -> list[dict]:
     """Fetch lap-by-lap breakdown for a specific Strava activity."""
+    if activity_source() == "garmin":
+        return [{"error": "Lap detail isn't available from the Garmin Personal API yet; judge the session from its summary."}]
     if not strava_configured():
         return []
     try:
