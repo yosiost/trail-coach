@@ -141,3 +141,54 @@ def test_migration_moves_leaked_custom_course_ref_to_its_race():
     assert "occ_course_profile" not in {r["name"] for r in db.get_athlete_references()}
     db.set_active_race_id(a)                              # predates both races -> oldest race
     assert "occ_course_profile" in {r["name"] for r in db.get_athlete_references()}
+
+
+def _legacy_blobs():
+    """Simulate a pre-multi-race DB: single unscoped course/plan blobs."""
+    with db._conn() as conn:
+        for k, v in (("course_json", '{"race":"OCC"}'), ("plan_csv", "OCC PLAN")):
+            db._run(conn, "INSERT INTO config_blobs (key, value, updated_at) VALUES (?,?,?)",
+                    (k, v, "2026-06-01T00:00:00+00:00"))
+
+
+def test_legacy_blobs_migrate_once_and_never_leak_into_new_race():
+    occ = db.create_goal("OCC", "2026-08-27", 55, 3500, 1, 2, 3)["id"]
+    _legacy_blobs()
+    db.init_db()                                          # first deploy with multi-race
+    assert db.get_race_config_blob("course_json", occ) == '{"race":"OCC"}'
+    assert db.get_config_blob("course_json") is None      # legacy key dropped
+    mr = db.create_goal("Monte Rosa", "2027-07-01", 60, 4000, 1, 2, 3)["id"]
+    db.init_db()                                          # next deploy
+    assert db.get_race_config_blob("course_json", mr) is None
+    assert db.get_race_config_blob("plan_csv", mr) is None
+
+
+def test_heals_copies_leaked_by_earlier_versions():
+    occ = db.create_goal("OCC", "2026-08-27", 55, 3500, 1, 2, 3)["id"]
+    mr = db.create_goal("Monte Rosa", "2027-07-01", 60, 4000, 1, 2, 3)["id"]
+    _legacy_blobs()
+    with db._conn() as conn:                              # state left by the old migration
+        for rid in (occ, mr):
+            for k, v in (("course_json", '{"race":"OCC"}'), ("plan_csv", "OCC PLAN")):
+                db._run(conn, "INSERT INTO config_blobs (key, value, updated_at) VALUES (?,?,?)",
+                        (f"{k}:{rid}", v, "2026-06-01T00:00:00+00:00"))
+    db.init_db()
+    assert db.get_race_config_blob("course_json", occ) == '{"race":"OCC"}'   # original kept
+    assert db.get_race_config_blob("plan_csv", occ) == "OCC PLAN"
+    assert db.get_race_config_blob("course_json", mr) is None               # leak removed
+    assert db.get_race_config_blob("plan_csv", mr) is None
+    assert db.get_config_blob("plan_csv") is None
+
+
+def test_heal_keeps_deliberate_copy_forward_and_edits():
+    occ = db.create_goal("OCC", "2026-08-27", 55, 3500, 1, 2, 3)["id"]
+    mr = db.create_goal("Monte Rosa", "2027-07-01", 60, 4000, 1, 2, 3)["id"]
+    _legacy_blobs()
+    with db._conn() as conn:
+        db._run(conn, "INSERT INTO config_blobs (key, value, updated_at) VALUES (?,?,?)",
+                (f"plan_csv:{occ}", "OCC PLAN", "2026-06-01T00:00:00+00:00"))
+    db.copy_race_data(occ, mr, plan=True)                 # user ticked "copy plan" -> fresh timestamp
+    db.set_race_config_blob("course_json", '{"race":"MR"}', race_id=mr)
+    db.init_db()
+    assert db.get_race_config_blob("plan_csv", mr) == "OCC PLAN"
+    assert db.get_race_config_blob("course_json", mr) == '{"race":"MR"}'

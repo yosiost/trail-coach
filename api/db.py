@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -342,20 +343,11 @@ def _migrate_multi_race(conn) -> None:
                     (r0, category, name),
                 )
 
-    # config_blobs: move the single course_json / plan_csv into race-scoped keys.
+    # config_blobs: move the single legacy course_json / plan_csv into the
+    # original race's scoped key, then drop the legacy key so it happens once.
     if r0 is not None:
         for key in _RACE_CONFIG_KEYS:
-            scoped = f"{key}:{r0}"
-            if _fetchone(conn, f"SELECT 1 FROM config_blobs WHERE key = {P}", (scoped,)):
-                continue  # already migrated
-            old = _fetchone(conn, f"SELECT value, updated_at FROM config_blobs WHERE key = {P}", (key,))
-            if old:
-                _run(
-                    conn,
-                    f"INSERT INTO config_blobs (key, value, updated_at) VALUES ({P},{P},{P}) "
-                    f"ON CONFLICT (key) DO NOTHING",
-                    (scoped, old["value"], old["updated_at"]),
-                )
+            _migrate_legacy_race_blob(conn, key, r0)
 
     # Point the active-race pointer at the existing race (once).
     if r0 is not None and not _fetchone(conn, f"SELECT 1 FROM config_blobs WHERE key = {P}", ("active_race_id",)):
@@ -366,6 +358,46 @@ def _migrate_multi_race(conn) -> None:
             f"ON CONFLICT (key) DO NOTHING",
             ("active_race_id", str(r0), now),
         )
+
+
+def _migrate_legacy_race_blob(conn, key: str, r0: int) -> None:
+    """Move the pre-multi-race `key` blob to `<key>:<race>` and delete it.
+
+    Earlier versions left the legacy key in place and re-ran this on every boot
+    against the *newest* race, so a race created later (e.g. next season's)
+    silently received the original race's course and plan on the next deploy.
+    Those re-copies are recognisable: same value and same updated_at as the
+    legacy row (the copy preserved it; real edits and copy-forward stamp now).
+    The first migration ran before any later race existed, so the original
+    owner is the lowest race id holding this key. Delete re-copies held by any
+    other race, then drop the legacy key."""
+    old = _fetchone(conn, f"SELECT value, updated_at FROM config_blobs WHERE key = {P}", (key,))
+    if not old:
+        return
+    def race_of(k: str) -> int | None:
+        suffix = k.split(":", 1)[1]
+        return int(suffix) if suffix.isdigit() else None
+
+    scoped = _fetchall(
+        conn, f"SELECT key, value, updated_at FROM config_blobs WHERE key LIKE {P}", (f"{key}:%",)
+    )
+    owned = sorted(r for r in (race_of(row["key"]) for row in scoped) if r is not None)
+    if owned:
+        owner = owned[0]
+        for row in scoped:
+            rid = race_of(row["key"])
+            if (rid is not None and rid != owner
+                    and row["value"] == old["value"] and row["updated_at"] == old["updated_at"]):
+                _run(conn, f"DELETE FROM config_blobs WHERE key = {P}", (row["key"],))
+                logging.warning("Removed %s copied into race %s by the legacy-blob migration.", key, rid)
+    else:
+        _run(
+            conn,
+            f"INSERT INTO config_blobs (key, value, updated_at) VALUES ({P},{P},{P}) "
+            f"ON CONFLICT (key) DO NOTHING",
+            (f"{key}:{r0}", old["value"], old["updated_at"]),
+        )
+    _run(conn, f"DELETE FROM config_blobs WHERE key = {P}", (key,))
 
 
 def _migrate_custom_named_course_refs(conn) -> None:
