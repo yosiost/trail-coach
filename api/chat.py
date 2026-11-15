@@ -91,7 +91,7 @@ The "Live training data" below carries everything specific to this athlete — p
 - Predicting race performance: use recent VO2max session quality, weekly vert volume, and long-run proximity to the race profile.
 - Prescribing sessions: cite the specific physiological target (e.g. "this builds the top-end aerobic capacity the hardest climb demands").
 
-Be direct and specific. Give actionable prescriptions, no vague motivational fluff. When the athlete asks to update the plan, use update_training_plan and always confirm what changed."""
+Be direct and specific. Give actionable prescriptions, no vague motivational fluff. When the athlete asks to update the plan, use update_training_plan to edit existing sessions or set_training_block to write whole weeks (a new block, or rewriting weeks), and always confirm what changed."""
 
 DIETITIAN_SYSTEM_PROMPT = """You are an elite sports dietitian specializing in ultra-endurance nutrition. You are precise, evidence-based, and practical — every recommendation is a specific, calculable protocol, not generic advice.
 
@@ -204,6 +204,51 @@ TOOLS = [
                 }
             },
             "required": ["updates"],
+        },
+    },
+    {
+        "name": "set_training_block",
+        "description": (
+            "Write one or more whole weeks into the current race's training plan, replacing "
+            "whatever is planned in those weeks (and any edits on those dates). Use this to load "
+            "a new block or rewrite weeks; use update_training_plan only for small edits to "
+            "sessions that already exist. start_date is snapped back to the athlete's week-start "
+            "day; week i covers start + 7*i days. List every day, with rest days as a session "
+            "named 'Rest' and distance_km 0."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "description": "First week's date, YYYY-MM-DD"},
+                "weeks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "phase": {"type": "string", "description": "e.g. Base, Build, Peak, Taper, Recovery"},
+                            "sessions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "day": {"type": "string", "description": "Mon..Sun"},
+                                        "session": {"type": "string"},
+                                        "distance_km": {"type": "number"},
+                                        "vert_m": {"type": "number"},
+                                        "duration_min": {"type": "number"},
+                                        "hr_zone": {"type": "string"},
+                                        "rpe": {"type": "number"},
+                                        "notes": {"type": "string"},
+                                    },
+                                    "required": ["day", "session"],
+                                },
+                            },
+                        },
+                        "required": ["sessions"],
+                    },
+                },
+            },
+            "required": ["start_date", "weeks"],
         },
     },
     {
@@ -392,6 +437,16 @@ def _handle_get_week_data(week_start_str: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Error fetching week data: {e}"
+
+
+def _handle_set_training_block(start_date, weeks) -> str:
+    from api import planner
+    try:
+        s = planner.write_plan_block(weeks, start_date)
+    except ValueError as e:
+        return f"Error: nothing written. {e}"
+    return (f"Wrote {s['weeks']} week(s), {s['sessions']} sessions, {s['start']} → {s['end']} "
+            "into the current race's plan (replaced anything planned in that range).")
 
 
 def _format_garmin_breakdown(activity_id, b: dict) -> str:
@@ -733,6 +788,9 @@ def _dispatch_tool(name: str, args: dict) -> tuple[str, dict]:
     flags: dict = {}
     if name == "update_training_plan":
         result = update_plan_rows(args.get("updates", []))
+        flags["plan_updated"] = True
+    elif name == "set_training_block":
+        result = _handle_set_training_block(args.get("start_date", ""), args.get("weeks", []))
         flags["plan_updated"] = True
     elif name == "get_week_data":
         result = _handle_get_week_data(args.get("week_start", ""))

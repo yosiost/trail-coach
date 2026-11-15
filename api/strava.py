@@ -363,6 +363,12 @@ def update_plan_rows(updates: list[dict]) -> str:
     for u in updates:
         if u.get("field", "") not in ALLOWED:
             return f"Error: field '{u.get('field')}' not allowed. Use one of: {', '.join(ALLOWED)}"
+    planned = {r["Date"] for r in _plan_rows()}
+    missing = sorted({u.get("date", "") for u in updates} - planned)
+    if missing:
+        return (f"Error: nothing applied. No planned session on {', '.join(missing)} — "
+                "update_training_plan only edits existing sessions. "
+                "Use set_training_block to add or rewrite whole weeks.")
     return set_plan_overrides(updates)
 
 

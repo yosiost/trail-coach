@@ -552,6 +552,19 @@ def get_plan_overrides(race_id: int | None = None) -> dict[str, dict[str, str]]:
     return result
 
 
+def delete_plan_overrides(start: str, end: str | None = None, race_id: int | None = None) -> None:
+    """Drop plan edits dated start..end (inclusive; open-ended when end is None)
+    for the given or active race — used when those weeks are rewritten."""
+    rid = race_id if race_id is not None else get_active_race_id()
+    sql = f"DELETE FROM plan_overrides WHERE race_id = {P} AND date >= {P}"
+    params: tuple = (rid, start)
+    if end is not None:
+        sql += f" AND date <= {P}"
+        params += (end,)
+    with _conn() as conn:
+        _run(conn, sql, params)
+
+
 def set_plan_overrides(updates: list[dict], race_id: int | None = None) -> str:
     rid = race_id if race_id is not None else get_active_race_id()
     now = datetime.now(timezone.utc).isoformat()

@@ -14,7 +14,7 @@ from datetime import date, timedelta
 
 from api.db import (
     get_active_goal, get_athlete_references, get_config_blob, set_config_blob,
-    get_race_config_blob, set_race_config_blob,
+    get_race_config_blob, set_race_config_blob, delete_plan_overrides,
 )
 
 # 3-letter keys so both "Mon" and "Monday" (and the week_start config) resolve.
@@ -78,7 +78,83 @@ def render_plan_csv(weeks: list[dict], plan_start: date, week_start_idx: int) ->
     return out.getvalue()
 
 
-def _build_messages(goal: dict, weeks: int, course: dict | None) -> list[dict]:
+def week_start_of(d: date, week_start_idx: int) -> date:
+    return d - timedelta(days=(d.weekday() - week_start_idx) % 7)
+
+
+def merge_plan_csv(existing_csv: str, new_csv: str, start: date, end: date | None,
+                   week_start_idx: int) -> str:
+    """Replace existing plan rows dated start..end (open-ended when end is None)
+    with new_csv's rows, keep everything else, and renumber Week labels W1..
+    chronologically so separately written blocks never share a label. Pure."""
+    def rows(text: str) -> list[dict]:
+        return list(csv.DictReader(io.StringIO(text))) if text and text.strip() else []
+
+    def in_range(r: dict) -> bool:
+        try:
+            d = date.fromisoformat(r.get("Date", ""))
+        except ValueError:
+            return False
+        return start <= d and (end is None or d <= end)
+
+    old = rows(existing_csv)
+    merged = [r for r in old if not in_range(r)] + rows(new_csv)
+    merged = [r for r in merged if r.get("Date")]
+    merged.sort(key=lambda r: r["Date"])
+    fields = list(_PLAN_COLUMNS)
+    for r in old:
+        fields += [k for k in r if k and k not in fields]
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore", restval="")
+    w.writeheader()
+    if merged:
+        first = week_start_of(date.fromisoformat(merged[0]["Date"]), week_start_idx)
+        for r in merged:
+            wk = week_start_of(date.fromisoformat(r["Date"]), week_start_idx)
+            r["Week"] = f"W{(wk - first).days // 7 + 1}"
+            w.writerow(r)
+    return out.getvalue()
+
+
+def _save_plan_range(new_csv: str, start: date, end: date | None) -> int:
+    """Merge new rows into the active race's plan over start..end, drop the
+    edits made on those dates (they belonged to the replaced sessions), and
+    return the number of new rows."""
+    n = len(list(csv.DictReader(io.StringIO(new_csv))))
+    if n < 1:
+        raise ValueError("The plan had no sessions with a valid day (Mon..Sun).")
+    merged = merge_plan_csv(get_race_config_blob("plan_csv") or "", new_csv, start, end,
+                            _week_start_idx())
+    set_race_config_blob("plan_csv", merged)
+    delete_plan_overrides(start.isoformat(), end.isoformat() if end else None)
+    return n
+
+
+def write_plan_block(weeks: list, start_date: str) -> dict:
+    """Write whole weeks (the coach's block) into the active race's plan from the
+    week containing start_date, replacing whatever was planned in those weeks."""
+    if not get_active_goal():
+        raise ValueError("No active race — create one in Settings first.")
+    try:
+        start = date.fromisoformat(str(start_date))
+    except ValueError:
+        raise ValueError("start_date must be YYYY-MM-DD.")
+    if not isinstance(weeks, list) or not weeks:
+        raise ValueError("weeks must be a non-empty list.")
+    if len(weeks) > _MAX_WEEKS:
+        raise ValueError(f"At most {_MAX_WEEKS} weeks per call.")
+    weeks = [w for w in weeks if isinstance(w, dict) and isinstance(w.get("sessions"), list)]
+    if not weeks:
+        raise ValueError("Each week needs a 'sessions' list.")
+    wsi = _week_start_idx()
+    start = week_start_of(start, wsi)
+    end = start + timedelta(days=7 * len(weeks) - 1)
+    n = _save_plan_range(render_plan_csv(weeks, start, wsi), start, end)
+    return {"weeks": len(weeks), "sessions": n, "start": start.isoformat(), "end": end.isoformat()}
+
+
+def _build_messages(goal: dict, weeks: int, course: dict | None,
+                    plan_start: date | None = None) -> list[dict]:
     course_line = ""
     if course:
         course_line = (f"\nRace course: {course.get('distance_km')}km / {course.get('vert_m')}m vert, "
@@ -106,7 +182,8 @@ def _build_messages(goal: dict, weeks: int, course: dict | None) -> list[dict]:
             f"{goal['distance_km']}km / {goal['vert_m']}m vert.{course_line}\n"
             f"Athlete: {_profile_brief()}\n"
             f"Methodology: {_coach_brief()}\n"
-            f"Generate exactly {weeks} weeks, starting this week and ending race week."
+            f"Generate exactly {weeks} weeks, starting the week of "
+            f"{(plan_start or date.today()).isoformat()} and ending race week."
         ),
     }
     return [system, user]
@@ -170,12 +247,17 @@ def generate_plan() -> dict:
     except (ValueError, KeyError):
         raise ValueError("The goal has no valid race date.")
     wsi = _week_start_idx()
-    today = date.today()
-    plan_start = today - timedelta(days=(today.weekday() - wsi) % 7)
-    total_days = (race_date - plan_start).days
-    if total_days < 7:
+    this_week = week_start_of(date.today(), wsi)
+    if (race_date - this_week).days < 7:
         raise ValueError("Your race date must be at least a week away to generate a plan.")
-    weeks_n = min((total_days // 7) + 1, _MAX_WEEKS)
+    race_week = week_start_of(race_date, wsi)
+    weeks_n = (race_week - this_week).days // 7 + 1
+    plan_start = this_week
+    if weeks_n > _MAX_WEEKS:
+        # Count back from race day so build, peak and taper are never cut off;
+        # weeks before plan_start are left for base blocks (set_training_block).
+        weeks_n = _MAX_WEEKS
+        plan_start = race_week - timedelta(days=7 * (_MAX_WEEKS - 1))
 
     course = None
     blob = get_race_config_blob("course_json")
@@ -186,7 +268,7 @@ def generate_plan() -> dict:
             course = None
 
     from api import llm  # lazy
-    messages = _build_messages(goal, weeks_n, course)
+    messages = _build_messages(goal, weeks_n, course, plan_start)
     weeks = None
     for attempt in range(2):  # one retry — the LLM output is occasionally malformed
         try:
@@ -199,10 +281,11 @@ def generate_plan() -> dict:
     if not weeks:
         raise ValueError("The model returned an unusable plan — try generating again.")
 
-    csv_text = render_plan_csv(weeks, plan_start, wsi)
-    row_count = csv_text.count("\n") - 1
-    if row_count < 1:
+    # Replace from plan_start onward; earlier weeks (e.g. a coach-written base
+    # block) are kept.
+    try:
+        row_count = _save_plan_range(render_plan_csv(weeks, plan_start, wsi), plan_start, None)
+    except ValueError:
         raise ValueError("The generated plan had no sessions — try again.")
-    set_race_config_blob("plan_csv", csv_text)
     return {"weeks": len(weeks), "sessions": row_count,
             "start": plan_start.isoformat(), "race_date": goal["race_date"]}
