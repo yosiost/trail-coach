@@ -4,7 +4,7 @@ import os
 from datetime import date as date_cls
 from pathlib import Path
 from api import llm
-from api.strava import update_plan_rows, fetch_activity_laps, get_this_week
+from api.strava import update_plan_rows, fetch_activity_laps, get_this_week, activity_source
 from api.db import (
     add_coach_note, get_athlete_references, upsert_athlete_reference,
     get_active_goal, update_goal, save_prediction, get_predictions,
@@ -163,7 +163,9 @@ TOOLS = [
     {
         "name": "get_activity_laps",
         "description": (
-            "Get lap-by-lap breakdown (distance, elevation, HR, zone) for a specific activity. "
+            "Get the breakdown (distance, elevation, HR, zone) of a specific activity: lap by lap "
+            "from Strava, or from Garmin totals per split type (work intervals vs recoveries, "
+            "climbing vs descending) plus HR time in each zone. "
             "Use the activity_id shown in the training context for completed sessions."
         ),
         "input_schema": {
@@ -392,7 +394,38 @@ def _handle_get_week_data(week_start_str: str) -> str:
         return f"Error fetching week data: {e}"
 
 
+def _format_garmin_breakdown(activity_id, b: dict) -> str:
+    if "error" in b:
+        return f"Error: {b['error']}"
+    lines = [f"Breakdown for activity {activity_id} (Garmin gives totals per split type, not per lap)"]
+    if b.get("lap_count"):
+        lines[0] += f" — {b['lap_count']} laps recorded"
+    lines[0] += ":"
+    for s in b["splits"]:
+        per = ""
+        if s["count"] > 1:
+            per = f" · per split ≈ {round(s['distance_km'] / s['count'], 2)}km {round(s['duration_min'] / s['count'], 1)}min"
+        pace = f" {s['pace_min_km']}min/km" if s["pace_min_km"] else ""
+        hr = f" avg {s['avg_hr']}bpm ({s['zone']}) max {s['max_hr']}" if s["avg_hr"] else ""
+        lines.append(
+            f"  {s['label']} ×{s['count']}: {s['distance_km']}km {s['duration_min']}min{pace} "
+            f"+{s['elev_gain_m']}/-{s['elev_loss_m']}m{hr}{per}"
+        )
+    if not b["splits"]:
+        lines.append("  (no split summaries recorded for this activity)")
+    if b.get("hr_zone_min"):
+        z = b["hr_zone_min"]
+        lines.append("  HR time in zone (min): " + " · ".join(f"Z{i + 1} {v}" for i, v in enumerate(z)))
+    return "\n".join(lines)
+
+
 def _handle_get_activity_laps(activity_id) -> str:
+    if activity_source() == "garmin":
+        from api import garmin_personal
+        try:
+            return _format_garmin_breakdown(activity_id, garmin_personal.fetch_activity_breakdown(int(activity_id)))
+        except (TypeError, ValueError):
+            return "Error: invalid activity_id"
     try:
         laps = fetch_activity_laps(int(activity_id))
     except (TypeError, ValueError):

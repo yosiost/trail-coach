@@ -66,7 +66,8 @@ def _get_access_token() -> str:
 
 
 def _get_json(path: str, params: dict) -> object:
-    url = f"{BASE_URL}{path}?{urllib.parse.urlencode(params)}"
+    query = urllib.parse.urlencode(params)
+    url = f"{BASE_URL}{path}" + (f"?{query}" if query else "")
     req = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {_get_access_token()}",
         "Accept": "application/json",
@@ -124,3 +125,97 @@ def fetch_activities(start: date, end: date) -> tuple[list[dict], str | None]:
         if "429" in err:
             return [], "Garmin rate limited — try again in a moment"
         return [], err
+
+
+# ── Per-activity breakdown (stands in for laps) ─────────────────────────────
+# The Personal API has no per-lap endpoint. Activity detail carries
+# splitSummaries: one aggregate per split type (all work intervals together,
+# all recoveries, all climbing, all descending …), and the activity list
+# carries time in each HR zone. Together they let the coach tell work from
+# recovery and climb from descent without parsing the FIT file.
+
+DETAIL_PATH = "/activity-service/activity/{activity_id}"
+
+SPLIT_LABELS = {
+    "INTERVAL_WARMUP":   "warm-up",
+    "INTERVAL_ACTIVE":   "work intervals",
+    "INTERVAL_RECOVERY": "recoveries",
+    "INTERVAL_REST":     "rests",
+    "INTERVAL_COOLDOWN": "cool-down",
+    "INTERVAL_WALK":     "walk intervals",
+    "INTERVAL_OTHER":    "other intervals",
+    "ASCENT_SPLIT":      "climbing",
+    "DESCENT_SPLIT":     "descending",
+    "CLIMB_ACTIVE":      "ClimbPro climbs",
+    "RWD_RUN":           "running",
+    "RWD_WALK":          "walking",
+    "RWD_STAND":         "standing",
+    "RUN_ACTIVE":        "run segments",
+    "RUN_REST":          "rest segments",
+}
+
+
+def _split(s: dict) -> dict:
+    from api.strava import hr_zone
+    count = int(s.get("noOfSplits") or 1)
+    dist_m = s.get("distance") or 0
+    dur_s = s.get("movingDuration") or s.get("duration") or 0
+    avg_hr = s.get("averageHR")
+    max_hr = s.get("maxHR")
+    stype = s.get("splitType") or ""
+    return {
+        "type":         stype,
+        "label":        SPLIT_LABELS.get(stype, stype.lower().replace("_", " ")),
+        "count":        count,
+        "distance_km":  round(dist_m / 1000, 2),
+        "duration_min": round(dur_s / 60, 1),
+        "elev_gain_m":  int(s.get("elevationGain") or 0),
+        "elev_loss_m":  int(s.get("elevationLoss") or 0),
+        "avg_hr":       int(avg_hr) if avg_hr else None,
+        "max_hr":       int(max_hr) if max_hr else None,
+        "zone":         hr_zone(int(avg_hr)) if avg_hr else None,
+        # min/km over moving time; None when there's no distance (e.g. rests)
+        "pace_min_km":  round(dur_s / 60 / (dist_m / 1000), 2) if dist_m >= 50 and dur_s else None,
+    }
+
+
+def fetch_activity_breakdown(activity_id: int) -> dict:
+    """Split-type summaries + HR time-in-zone for one activity.
+    Returns {"splits": [...], "hr_zone_min": [z1..z5] | None, "lap_count": int | None}
+    or {"error": "..."}."""
+    if not garmin_personal_configured():
+        return {"error": "Garmin Personal API is not configured"}
+    try:
+        detail = _get_json(DETAIL_PATH.format(activity_id=int(activity_id)), {})
+        if not isinstance(detail, dict):
+            raise ValueError(f"unexpected Garmin response: {type(detail).__name__}")
+        order = list(SPLIT_LABELS)
+        splits = sorted(
+            (_split(s) for s in detail.get("splitSummaries") or [] if isinstance(s, dict)),
+            key=lambda s: order.index(s["type"]) if s["type"] in order else len(order),
+        )
+        # Zone times and lap count live on the activity-list entry, not the
+        # detail DTO: look the activity up on its own local start date.
+        zones = lap_count = None
+        day = str((detail.get("summaryDTO") or {}).get("startTimeLocal") or "")[:10]
+        if day:
+            listed = _get_json(SEARCH_PATH, {"start": 0, "limit": PAGE_SIZE, "startDate": day, "endDate": day})
+            match = next((a for a in listed or [] if isinstance(a, dict)
+                          and a.get("activityId") == int(activity_id)), None)
+            if match:
+                raw = [match.get(f"hrTimeInZone_{i}") for i in range(1, 6)]
+                if any(v is not None for v in raw):
+                    zones = [round((v or 0) / 60, 1) for v in raw]
+                lap_count = match.get("lapCount")
+        return {"splits": splits, "hr_zone_min": zones, "lap_count": lap_count}
+    except Exception as e:
+        err = str(e)
+        logging.error("garmin_personal fetch_activity_breakdown error: %s", err)
+        if "401" in err:
+            _token_cache.clear()
+            return {"error": "Garmin rejected the Personal API key — check it hasn't expired"}
+        if "404" in err:
+            return {"error": f"Garmin has no activity {activity_id}"}
+        if "429" in err:
+            return {"error": "Garmin rate limited — try again in a moment"}
+        return {"error": err}
