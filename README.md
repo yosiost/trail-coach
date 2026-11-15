@@ -99,6 +99,7 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `ALLOWED_EMAILS` | For `AUTH_MODE=oauth`. |
 | `DATABASE_URL` | Postgres URL for cloud; blank uses local SQLite. |
 | `GARMIN_PERSONAL_API_KEY` | Optional. Your own key from Garmin Connect Web → Settings → Personal API Key. Uses Garmin's official Personal API and takes precedence over Strava when set. Keys expire (30 days to 1 year): rotate it before then. |
+| `ACTIVITY_POLL_SECONDS` | How old the Garmin activity cache may get before it is re-fetched (default `900`). Garmin's Personal API has no webhook, so the app polls on page load and chat. |
 | `STRAVA_*` | Optional Strava integration (run `scripts/strava_setup.py`). See [Strava API terms](#strava-api-terms) before enabling. |
 | `SEED_DEMO_DATA` | `1` seeds a generic demo instead of onboarding. |
 

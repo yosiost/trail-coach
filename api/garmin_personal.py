@@ -4,12 +4,13 @@ Each self-hoster creates their own Personal API key in Garmin Connect Web
 (Settings → Personal API Key) and sets GARMIN_PERSONAL_API_KEY. The key is
 exchanged for a 24-hour bearer token (no refresh token; just re-exchange).
 
-Endpoints follow Garmin's reference client (garmin/connect-personal-api-python).
-The activity summary field names are not in Garmin's public docs; they match
-the Garmin Connect activity-list shape the legacy integration parsed
-(activityId, activityName, startTimeLocal, activityType.typeKey, distance [m],
-duration [s], elevationGain [m], averageHR). Parsing is defensive so a missing
-field degrades to 0/None instead of failing the week view.
+Token exchange follows Garmin's reference client
+(garmin/connect-personal-api-python). Endpoints, query params and field names
+follow Garmin's Personal API OpenAPI spec (SummarizedActivityDTO): distance and
+elevationGain in meters, duration/movingDuration in seconds, averageHR in bpm,
+startTimeLocal as "yyyy-MM-dd HH:mm:ss" local time. startDate/endDate are
+inclusive local dates. Parsing is still defensive so a missing field degrades
+to 0/None instead of failing the week view.
 """
 from __future__ import annotations
 
@@ -20,13 +21,13 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from datetime import date, timedelta
+from datetime import date
 
 BASE_URL = os.environ.get("GARMIN_PERSONAL_API_BASE_URL", "https://personal.connectapi.garmin.com")
 TOKEN_PATH = "/personalapitoken-service/personal-api/personal-api-key/token"
 SEARCH_PATH = "/activitylist-service/activities/search/activities"
-PAGE_SIZE = 100
-MAX_PAGES = 10  # hard stop: 1,000 activities per window is far beyond one week
+PAGE_SIZE = 99   # the spec's default page size; the maximum is undocumented
+MAX_PAGES = 10   # hard stop: ~1,000 activities per window is far beyond one week
 
 _token_cache: dict = {}
 
@@ -103,9 +104,7 @@ def fetch_activities(start: date, end: date) -> tuple[list[dict], str | None]:
             batch = _get_json(SEARCH_PATH, {
                 "start": page * PAGE_SIZE, "limit": PAGE_SIZE,
                 "startDate": start.isoformat(),
-                # endDate inclusivity is undocumented — ask one day past and
-                # filter below, so the last day is never dropped.
-                "endDate": (end + timedelta(days=1)).isoformat(),
+                "endDate": end.isoformat(),  # inclusive per the spec
             })
             if not isinstance(batch, list):
                 raise ValueError(f"unexpected Garmin response: {type(batch).__name__}")
