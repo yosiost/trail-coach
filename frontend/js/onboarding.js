@@ -146,7 +146,7 @@ function renderOnboarding() {
       <div class="ob-choices">
         ${choice("src", "manual", "Manual entry", "No account needed — log runs yourself.", true)}
         ${choice("src", "strava", "Strava", "Connect via your own Strava API app.")}
-        ${choice("src", "garmin", "Garmin", "Advanced / legacy.")}
+        ${choice("src", "garmin", "Garmin", "Connect via your own Garmin Personal API key.")}
       </div>`;
   }
   async function submitSource() { S.activity_source = checked("src"); }

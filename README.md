@@ -22,7 +22,7 @@ Trail Coach is a single-tenant web app (installable PWA) that pairs a training-p
 - **🗺️ Trail-native** — course elevation profiles, aid stations, cutoffs, climb/descent pacing, and per-segment carb planning are first-class.
 - **🔐 Zero-overhead auth** — a single shared password by default (no Google Cloud project needed); optional Google OAuth.
 - **🧭 First-run onboarding + Settings** — a setup wizard writes your athlete profile, goal, plan, course, activity source, and coaching style; a **Settings** page lets you retarget the race and rebuild the coach/dietitian personas anytime. No code editing.
-- **🏃 Flexible activity source** — Strava integration, or manual entry; the plan/week engine is source-agnostic.
+- **🏃 Flexible activity source** — the official Garmin Personal API, Strava, or manual entry; the plan/week engine is source-agnostic.
 - **☁️ SQLite or Postgres** — runs on local SQLite out of the box; point `DATABASE_URL` at managed Postgres (e.g. Neon) for cloud deploys.
 
 ---
@@ -98,6 +98,7 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 | `APP_PASSWORD` | The login password for `AUTH_MODE=password`. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `ALLOWED_EMAILS` | For `AUTH_MODE=oauth`. |
 | `DATABASE_URL` | Postgres URL for cloud; blank uses local SQLite. |
+| `GARMIN_PERSONAL_API_KEY` | Optional. Your own key from Garmin Connect Web → Settings → Personal API Key. Uses Garmin's official Personal API and takes precedence over Strava when set. Keys expire (30 days to 1 year): rotate it before then. |
 | `STRAVA_*` | Optional Strava integration (run `scripts/strava_setup.py`). See [Strava API terms](#strava-api-terms) before enabling. |
 | `SEED_DEMO_DATA` | `1` seeds a generic demo instead of onboarding. |
 
