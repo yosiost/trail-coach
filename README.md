@@ -98,8 +98,15 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 | `APP_PASSWORD` | The login password for `AUTH_MODE=password`. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `ALLOWED_EMAILS` | For `AUTH_MODE=oauth`. |
 | `DATABASE_URL` | Postgres URL for cloud; blank uses local SQLite. |
-| `STRAVA_*` | Optional Strava integration (run `scripts/strava_setup.py`). |
+| `STRAVA_*` | Optional Strava integration (run `scripts/strava_setup.py`). See [Strava API terms](#strava-api-terms) before enabling. |
 | `SEED_DEMO_DATA` | `1` seeds a generic demo instead of onboarding. |
+
+### Strava API terms
+
+> [!WARNING]
+> Enabling the Strava integration sends your Strava activities to the LLM provider you configure, so the coach can reason over them. Strava's API terms restrict how API data may be used with AI. Strava's [API Agreement](https://www.strava.com/legal/api) and its [2024 update](https://press.strava.com/articles/updates-to-stravas-api-agreement) prohibit using API data to train AI models. Strava's separate API Policy (effective June 1, 2026) is reported to go further and also restrict feeding API data into AI applications at inference time, including context windows.
+>
+> Each self-hoster registers **their own** Strava API application and is bound by Strava's terms for it. This project ships no Strava credentials or data. Read the current terms yourself and decide whether your use complies. If in doubt, use manual activity entry instead. This is not legal advice.
 
 ---
 
