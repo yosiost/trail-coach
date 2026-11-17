@@ -55,3 +55,24 @@ def test_week_reports_activity_source(monkeypatch):
     monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "k")
     week = strava.get_this_week(week_start=date(2026, 3, 2), injected_activities=[])
     assert week["source"] == "garmin"  # frontend links/labels Actuals by this
+
+
+def test_strava_ids_are_strings_and_prefer_id_str(monkeypatch):
+    """Strava ids go 64-bit after 2027-06-01; JS can't hold them as numbers."""
+    import io, json as _json
+    big = 9007199254740993  # 2**53 + 1: not representable as a JS number
+    raw = [
+        {"id": big, "id_str": str(big), "start_date_local": "2026-03-03T07:00:00Z", "distance": 1000},
+        {"id": 42, "start_date_local": "2026-03-04T07:00:00Z", "distance": 1000},  # pre-id_str payload
+    ]
+    monkeypatch.setattr(strava, "strava_configured", lambda: True)
+    monkeypatch.setattr(strava, "_get_access_token", lambda: "t")
+
+    class Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(strava.urllib.request, "urlopen", lambda *a, **k: Resp(_json.dumps(raw).encode()))
+    acts, err = strava._fetch_strava_activities(date(2026, 3, 2), date(2026, 3, 8))
+    assert err is None
+    assert [a["id"] for a in acts] == [str(big), "42"]

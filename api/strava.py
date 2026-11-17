@@ -185,7 +185,9 @@ def _fetch_strava_activities(start: date, end: date) -> tuple[list[dict], str | 
             sport    = a.get("sport_type") or a.get("type", "")
             avg_hr   = a.get("average_heartrate")
             act = {
-                "id":           a.get("id"),
+                # Strava ids become 64-bit after 2027-06-01; a JSON number above
+                # 2^53 loses precision in the browser, so carry it as a string.
+                "id":           a.get("id_str") or (str(a["id"]) if a.get("id") is not None else None),
                 "date":         a.get("start_date_local", "")[:10],
                 "name":         a.get("name", ""),
                 "type":         SPORT_TYPE_MAP.get(sport, sport.lower()),
