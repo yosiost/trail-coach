@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -19,19 +21,80 @@ P = "%s" if _PG else "?"
 _JSON_LEN = "json_array_length(messages::json)" if _PG else "json_array_length(messages)"
 
 
+# ── Postgres connection reuse ────────────────────────────────────────────────
+# Every helper below opens its own `with _conn()` block, so one chat message
+# runs dozens of them (~45 to build the coach context). A fresh psycopg2
+# connection to Neon is a TCP + TLS + auth handshake each time, which adds
+# seconds per message. Instead, finished connections go back to a small pool
+# and the next block reuses one. Transaction semantics are unchanged: each
+# block still commits or rolls back its own work, and a nested block takes a
+# different connection, as before.
+_POOL_MAX = int(os.environ.get("DB_POOL_SIZE", "4"))
+_POOL_CHECK_AFTER_S = 30  # ping a connection idle longer than this before reuse
+_pool: list[tuple[object, float]] = []  # (connection, monotonic time returned)
+_pool_lock = threading.Lock()
+connections_opened = 0  # new handshakes since start (logged with chat timings)
+
+
+def _pg_checkout():
+    """A live pooled connection, or a new one. A connection idle for a while
+    is pinged first: Neon may have suspended compute and dropped it."""
+    global connections_opened
+    import psycopg2
+    while True:
+        with _pool_lock:
+            item = _pool.pop() if _pool else None
+        if item is None:
+            connections_opened += 1
+            return psycopg2.connect(DATABASE_URL)
+        c, returned_at = item
+        if c.closed:
+            continue
+        if time.monotonic() - returned_at > _POOL_CHECK_AFTER_S:
+            try:
+                with c.cursor() as cur:
+                    cur.execute("SELECT 1")
+                c.rollback()
+            except Exception:
+                _close_quietly(c)
+                continue
+        return c
+
+
+def _pg_checkin(c, healthy: bool) -> None:
+    if healthy and not c.closed:
+        with _pool_lock:
+            if len(_pool) < _POOL_MAX:
+                _pool.append((c, time.monotonic()))
+                return
+    _close_quietly(c)
+
+
+def _close_quietly(c) -> None:
+    try:
+        c.close()
+    except Exception:
+        pass
+
+
 @contextmanager
 def _conn():
     if _PG:
-        import psycopg2
-        c = psycopg2.connect(DATABASE_URL)
+        c = _pg_checkout()
+        healthy = False
         try:
             yield c
             c.commit()
+            healthy = True
         except Exception:
-            c.rollback()
+            try:
+                c.rollback()
+                healthy = True  # the connection survived; only the work failed
+            except Exception:
+                pass
             raise
         finally:
-            c.close()
+            _pg_checkin(c, healthy)
     else:
         c = sqlite3.connect(str(_DB))
         c.row_factory = sqlite3.Row
