@@ -587,9 +587,15 @@ function statusBadge(status) {
   return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
 }
 
-function stravaLink(id) {
-  if (!id) return "";
-  return ` <a href="https://www.strava.com/activities/${id}" target="_blank" style="color:#fc4c02;font-size:11px;text-decoration:none" title="View on Strava">↗ Strava</a>`;
+const SOURCE_LINKS = {
+  garmin: { label: "Garmin", color: "#007cc3", url: id => `https://connect.garmin.com/modern/activity/${id}` },
+  strava: { label: "Strava", color: "#fc4c02", url: id => `https://www.strava.com/activities/${id}` },
+};
+
+function activityLink(id) {
+  const src = SOURCE_LINKS[lastWeekData && lastWeekData.source];
+  if (!id || !src) return "";
+  return ` <a href="${src.url(id)}" target="_blank" style="color:${src.color};font-size:11px;text-decoration:none" title="View on ${src.label}">↗ ${src.label}</a>`;
 }
 
 function renderWeek(data) {
@@ -597,7 +603,7 @@ function renderWeek(data) {
   titleEl.textContent = `${data.week_num} · ${data.phase} · ${data.week_label}`;
   const s = data.summary;
   const errorHtml = data.garmin_error
-    ? `<div style="color:var(--missed);margin-left:auto">⚠ Strava: ${data.garmin_error}</div>`
+    ? `<div style="color:var(--missed);margin-left:auto">⚠ ${(SOURCE_LINKS[data.source] || {label: "Activities"}).label}: ${data.garmin_error}</div>`
     : "";
   summaryEl.innerHTML = `
     <div>Distance: <span>${s.done_km} / ${s.plan_km} km</span></div>
@@ -621,7 +627,7 @@ function renderWeek(data) {
       actual = actuals.map(a => {
         let s = `${a.distance_km} km · ${a.duration_min} min`;
         if (a.elev_gain_m) s += ` · ${a.elev_gain_m}m↑`;
-        s += stravaLink(a.id);
+        s += activityLink(a.id);
         return s;
       }).join("<br>");
       const first = actuals[0];
@@ -660,7 +666,7 @@ function renderDetail(data) {
         const parts = [`${a.distance_km} km`, `${a.duration_min} min`];
         if (a.elev_gain_m) parts.push(`${a.elev_gain_m}m↑`);
         if (a.avg_hr) parts.push(`${a.avg_hr} bpm (${a.zone})`);
-        return `<div class="detail-actual">✅ ${parts.join(" · ")}${stravaLink(a.id)}</div>`;
+        return `<div class="detail-actual">✅ ${parts.join(" · ")}${activityLink(a.id)}</div>`;
       }).join("");
     } else if (row.status === "missed") {
       actualHtml = `<div class="detail-actual missed">❌ Missed</div>`;
