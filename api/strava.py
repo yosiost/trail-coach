@@ -348,6 +348,7 @@ def get_this_week(next_week: bool = False, injected_activities: list | None = No
         "week_num":     plan[0]["week"]  if plan else "",
         "rows":         rows,
         "garmin_error": error,  # key kept for frontend compatibility
+        "source":       activity_source(),  # labels the Actual column's links
         "summary": {
             "done_km":   round(done_km, 1),
             "done_vert": done_vert,

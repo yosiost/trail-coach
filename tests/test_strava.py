@@ -47,3 +47,11 @@ def test_this_week_renders_plan_without_strava():
     week = strava.get_this_week(week_start=date(2026, 3, 2), injected_activities=[])
     assert {"Easy", "Long"} <= {r["session"] for r in week["rows"]}
     assert week["summary"]["plan_km"] == 28      # 8 + 20, no Strava needed
+
+
+def test_week_reports_activity_source(monkeypatch):
+    db.create_goal("R", "2026-12-31", 20, 600, 7200, 7000, 8000)
+    db.set_race_config_blob("plan_csv", _PLAN)
+    monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "k")
+    week = strava.get_this_week(week_start=date(2026, 3, 2), injected_activities=[])
+    assert week["source"] == "garmin"  # frontend links/labels Actuals by this
