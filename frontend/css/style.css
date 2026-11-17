@@ -256,7 +256,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "SF P
   -webkit-overflow-scrolling: touch;
 }
 
-.msg { max-width: 80%; padding: 9px 13px; border-radius: 14px; line-height: 1.55; font-size: 13.5px; white-space: pre-wrap; word-break: break-word; }
+.msg { max-width: 80%; padding: 9px 13px; border-radius: 14px; line-height: 1.55; font-size: 13.5px; white-space: pre-wrap; word-break: break-word; unicode-bidi: plaintext; }
 .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
 .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.system { align-self: center; color: var(--muted); font-size: 12px; background: none; }
@@ -301,6 +301,18 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "SF P
 }
 #chat-send:hover { opacity: 0.85; }
 #chat-send:disabled { opacity: 0.4; }
+
+/* ── Voice dictation ── */
+#voice-group { display: flex; flex-direction: column; gap: 4px; }
+#voice-group[hidden] { display: none; }
+#voice-mic, #voice-lang {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; cursor: pointer;
+}
+#voice-mic { font-size: 18px; padding: 6px 10px; }
+#voice-lang { font-size: 10px; padding: 2px 6px; color: var(--muted); }
+#voice-mic.listening { border-color: var(--missed); background: rgba(239,68,68,0.15); animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { box-shadow: 0 0 0 4px rgba(239,68,68,0.25); } }
 
 /* ── Week panel ── */
 .week-nav { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
