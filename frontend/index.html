@@ -52,12 +52,23 @@
             <button id="persona-coach" class="persona-btn active" data-persona="coach">🏃 Coach</button>
             <button id="persona-dietitian" class="persona-btn" data-persona="dietitian">🥗 Dietitian</button>
             <button id="persona-analyst" class="persona-btn" data-persona="analyst">📊 Analyst</button>
+            <button id="btn-inspect" class="ins-btn" title="What the coach saw on the last reply">🔍</button>
           </div>
           <div id="chat-messages"></div>
           <div id="chat-input-area">
             <button id="btn-history" title="Chat history">☰</button>
             <textarea id="chat-input" placeholder="Ask your coach…" rows="2"></textarea>
             <button id="chat-send">Send</button>
+          </div>
+        </div>
+        <div id="inspect-overlay" hidden>
+          <div id="inspect-panel">
+            <div id="inspect-head">
+              <strong>What the coach saw</strong>
+              <button id="inspect-copy" class="ins-btn">Copy all</button>
+              <button id="inspect-close" class="ins-btn" title="Close">✕</button>
+            </div>
+            <div id="inspect-body"></div>
           </div>
         </div>
       </div>

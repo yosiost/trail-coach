@@ -109,6 +109,80 @@ personaBtns.forEach(btn => {
   btn.addEventListener("click", () => setPersona(btn.dataset.persona));
 });
 
+// ── Chat inspector: what the model saw on the last turn ─────────────────────
+const inspectOverlay = document.getElementById("inspect-overlay");
+const inspectBody    = document.getElementById("inspect-body");
+let inspectText = "";
+
+function escHtml(s) {
+  return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function approxTokens(s) { return Math.round((s || "").length / 4).toLocaleString(); }
+
+function inspectSection(title, sub, body, open = false) {
+  return `<details${open ? " open" : ""}><summary>${escHtml(title)} <span>${escHtml(sub)}</span></summary><pre>${escHtml(body)}</pre></details>`;
+}
+
+function renderInspect(t) {
+  const fmtMs = ms => (ms == null ? "?" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+  const head = t.preview
+    ? `Preview: no reply yet since the server started. This is what the next ${t.persona} reply would get.`
+    : `Last reply · ${t.persona} · ${new Date(t.at).toLocaleString()}`;
+  const timing = [`Context: ${fmtMs(t.context_ms)} ${t.context_cached ? "(cached)" : "(built)"}`];
+  (t.rounds || []).forEach((r, i) => {
+    const tools = r.tools.map(x => `${x.name} ${fmtMs(x.ms)}`).join(", ");
+    const u = r.usage ? ` · tokens in ${r.usage.prompt ?? "?"} (cached ${r.usage.cached ?? 0}) out ${r.usage.completion ?? "?"}` : "";
+    timing.push(`Model call ${i + 1}: first token ${fmtMs(r.ttft_ms)}, done ${fmtMs(r.llm_ms)}${u}${tools ? ` → tools: ${tools}` : ""}`);
+  });
+  if (t.total_ms != null) timing.push(`<strong>Total: ${fmtMs(t.total_ms)}</strong>`);
+
+  const convo = (t.messages || []).map(m => `── ${m.role} ──\n${m.content}`).join("\n\n");
+  let html = `<div class="ins-meta">${escHtml(head)}<br>Model: ${escHtml(t.model)}</div>`;
+  html += `<div class="ins-timing">${timing.map(x => x.startsWith("<strong>") ? x : escHtml(x)).join("<br>")}</div>`;
+  html += inspectSection("Live context", `${t.context.length.toLocaleString()} chars ≈ ${approxTokens(t.context)} tokens`, t.context, true);
+  html += inspectSection("System prompt", `${t.system.length.toLocaleString()} chars ≈ ${approxTokens(t.system)} tokens`, t.system);
+  if (!t.preview) html += inspectSection("Conversation sent", `${t.messages.length} messages`, convo);
+  (t.rounds || []).forEach((r, i) => r.tools.forEach(x => {
+    html += inspectSection(`Tool: ${x.name}`, `model call ${i + 1} · ${fmtMs(x.ms)}`,
+      `args:\n${JSON.stringify(x.args, null, 2)}\n\nresult:\n${x.result}`);
+  }));
+  inspectBody.innerHTML = html;
+
+  inspectText = [head, `Model: ${t.model}`, ...timing.map(x => x.replace(/<[^>]+>/g, "")),
+    "", "=== LIVE CONTEXT ===", t.context, "", "=== SYSTEM PROMPT ===", t.system,
+    ...(t.preview ? [] : ["", "=== CONVERSATION SENT ===", convo]),
+    ...(t.rounds || []).flatMap((r, i) => r.tools.map(x =>
+      `\n=== TOOL ${x.name} (call ${i + 1}) ===\nargs: ${JSON.stringify(x.args)}\nresult:\n${x.result}`)),
+  ].join("\n");
+}
+
+async function openInspect() {
+  inspectOverlay.hidden = false;
+  inspectBody.textContent = "Loading…";
+  try {
+    const res = await fetch(`/api/chat/debug?persona=${encodeURIComponent(currentPersona)}`);
+    const t = await res.json();
+    if (!res.ok) throw new Error(t.error || res.statusText);
+    renderInspect(t);
+  } catch (e) {
+    inspectBody.textContent = `Could not load: ${e.message}`;
+  }
+}
+
+document.getElementById("btn-inspect").addEventListener("click", openInspect);
+document.getElementById("inspect-close").addEventListener("click", () => { inspectOverlay.hidden = true; });
+inspectOverlay.addEventListener("click", e => { if (e.target === inspectOverlay) inspectOverlay.hidden = true; });
+document.getElementById("inspect-copy").addEventListener("click", async e => {
+  try {
+    await navigator.clipboard.writeText(inspectText);
+    e.target.textContent = "Copied ✓";
+  } catch {
+    e.target.textContent = "Copy failed";
+  }
+  setTimeout(() => { e.target.textContent = "Copy all"; }, 1500);
+});
+
 function makeTitle(text) {
   const t = text.trim();
   if (t.length <= 50) return t;

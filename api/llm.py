@@ -128,5 +128,8 @@ def completion(messages: list[dict], tools: list[dict], max_tokens: int, stream:
         tools=tools,
         max_tokens=max_tokens,
         stream=stream,
+        # Ask for token usage on the final stream chunk (dropped by providers
+        # that don't support it). Callers must tolerate a chunk with no choices.
+        **({"stream_options": {"include_usage": True}} if stream else {}),
         **_auth_kwargs(),
     )

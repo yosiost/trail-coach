@@ -112,6 +112,13 @@ def _invalidate_context_cache() -> None:
 
 
 def get_cached_context() -> str:
+    return _context_with_meta()[0]
+
+
+def _context_with_meta() -> tuple[str, dict]:
+    """(context, {"context_ms", "context_cached"}) — timing feeds the chat trace."""
+    t = time.perf_counter()
+    meta = lambda cached: {"context_ms": round((time.perf_counter() - t) * 1000), "context_cached": cached}
     # Keyed by the active race so switching races never serves another race's
     # cached context, even within the TTL.
     rid = get_active_race_id()
@@ -119,13 +126,13 @@ def get_cached_context() -> str:
         if (time.monotonic() < _context_cache["expires_at"]
                 and _context_cache["text"] is not None
                 and _context_cache["race_id"] == rid):
-            return _context_cache["text"]
+            return _context_cache["text"], meta(True)
     text = build_context()
     with _context_lock:
         _context_cache["text"] = text
         _context_cache["race_id"] = rid
         _context_cache["expires_at"] = time.monotonic() + _CONTEXT_TTL
-    return text
+    return text, meta(False)
 
 
 @app.get("/")
@@ -707,8 +714,8 @@ def chat():
     if not messages or messages[-1].get("role") != "user":
         return jsonify({"error": "no user message"}), 400
     try:
-        context = get_cached_context()
-        result  = ai_chat(messages, context=context, persona=persona)
+        context, meta = _context_with_meta()
+        result  = ai_chat(messages, context=context, persona=persona, meta=meta)
         if result["plan_updated"] or result.get("goal_updated"):
             _invalidate_context_cache()
         return jsonify({
@@ -730,14 +737,14 @@ def chat_stream():
     if not messages or messages[-1].get("role") != "user":
         return jsonify({"error": "no user message"}), 400
     try:
-        context = get_cached_context()
+        context, meta = _context_with_meta()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     def generate():
         try:
             yield from ai_chat_stream(
-                messages, context=context, persona=persona,
+                messages, context=context, persona=persona, meta=meta,
                 on_plan_updated=_invalidate_context_cache,
                 on_goal_updated=_invalidate_context_cache,
             )
@@ -750,6 +757,24 @@ def chat_stream():
         content_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/chat/debug")
+@login_required
+def chat_debug():
+    """What the model saw on the last chat turn: system prompt, live context,
+    the conversation window, every tool call with its result, and timings.
+    Before any turn (e.g. after a restart) it previews the system prompt and
+    context the next turn would send."""
+    from api import chat as chat_mod
+    trace = chat_mod.last_trace
+    if trace is None:
+        persona = request.args.get("persona", "coach")
+        context, meta = _context_with_meta()
+        base, ctx = chat_mod.build_system(persona, context)
+        trace = {"preview": True, "persona": persona, "model": chat_mod.llm.model_string(),
+                 "system": base, "context": ctx or "", "messages": [], "rounds": [], **meta}
+    return jsonify(trace)
 
 
 @app.get("/api/sessions")
