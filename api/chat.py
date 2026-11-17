@@ -1,6 +1,8 @@
 from __future__ import annotations
 import json
 import os
+import time
+from datetime import datetime, timezone
 from datetime import date as date_cls
 from pathlib import Path
 from api import llm
@@ -830,16 +832,84 @@ def _dispatch_tool(name: str, args: dict) -> tuple[str, dict]:
     return result, flags
 
 
-def chat(messages: list[dict], context: str | None = None, persona: str = "coach") -> dict:
+# ── Turn trace: exactly what the model saw, and where the time went ─────────
+# Kept in memory for the last turn only (single-user app) and served by
+# /api/chat/debug, so the athlete can judge a reply against its inputs.
+# One summary line per turn also goes to the server log.
+_TRACE_RESULT_CHARS = 6000
+last_trace: dict | None = None
+
+
+def _usage(obj) -> dict | None:
+    u = getattr(obj, "usage", None)
+    if not u:
+        return None
+    def g(o, k):
+        return (o.get(k) if isinstance(o, dict) else getattr(o, k, None)) if o else None
+    details = g(u, "prompt_tokens_details")
+    return {
+        "prompt": g(u, "prompt_tokens"),
+        "completion": g(u, "completion_tokens"),
+        "cached": g(details, "cached_tokens") or g(u, "cache_read_input_tokens"),
+    }
+
+
+def _new_trace(persona: str, base: str, ctx: str | None, sent: list[dict], meta: dict | None) -> dict:
+    return {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "persona": persona, "model": llm.model_string(),
+        "system": base, "context": ctx or "", "messages": sent,
+        "rounds": [], "t0": time.perf_counter(), **(meta or {}),
+    }
+
+
+def _traced_dispatch(rnd: dict, name: str, raw_args) -> tuple[str, dict]:
+    args = _parse_args(raw_args)
+    t = time.perf_counter()
+    result, flags = _dispatch_tool(name, args)
+    text = str(result)
+    rnd["tools"].append({
+        "name": name, "args": args, "ms": round((time.perf_counter() - t) * 1000),
+        "result": text if len(text) <= _TRACE_RESULT_CHARS else text[:_TRACE_RESULT_CHARS] + " …[truncated]",
+    })
+    return result, flags
+
+
+def _finish_trace(trace: dict, reply: str) -> None:
+    global last_trace
+    trace["reply"] = reply
+    trace["total_ms"] = round((time.perf_counter() - trace.pop("t0")) * 1000)
+    last_trace = trace
+    logging.info(
+        "chat turn: persona=%s model=%s context_ms=%s rounds=%d llm_ms=%s ttft_ms=%s tools=%s "
+        "prompt_chars=%d tokens=%s total_ms=%d",
+        trace["persona"], trace["model"], trace.get("context_ms"), len(trace["rounds"]),
+        [r.get("llm_ms") for r in trace["rounds"]], [r.get("ttft_ms") for r in trace["rounds"]],
+        [f"{t['name']}:{t['ms']}ms" for r in trace["rounds"] for t in r["tools"]],
+        len(trace["system"]) + len(trace["context"]),
+        [r.get("usage") for r in trace["rounds"]], trace["total_ms"],
+    )
+
+
+def chat(messages: list[dict], context: str | None = None, persona: str = "coach",
+         meta: dict | None = None) -> dict:
     base, ctx = build_system(persona, context)
-    convo = [llm.system_message(base, ctx)] + _windowed(messages)
+    sent = _windowed(messages)
+    convo = [llm.system_message(base, ctx)] + sent
     tools = llm.with_cache_control(llm.to_openai_tools(TOOLS))
     plan_updated = goal_updated = fuel_updated = False
+    trace = _new_trace(persona, base, ctx, sent, meta)
 
     while True:
+        rnd: dict = {"tools": []}
+        trace["rounds"].append(rnd)
+        t = time.perf_counter()
         response = llm.completion(convo, tools, max_tokens=8192)
+        rnd["llm_ms"] = round((time.perf_counter() - t) * 1000)
+        rnd["usage"] = _usage(response)
         msg = response.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None)
+        rnd["text"] = msg.content or ""
 
         if tool_calls:
             convo.append({
@@ -852,34 +922,47 @@ def chat(messages: list[dict], context: str | None = None, persona: str = "coach
                 ],
             })
             for tc in tool_calls:
-                result, flags = _dispatch_tool(tc.function.name, _parse_args(tc.function.arguments))
+                result, flags = _traced_dispatch(rnd, tc.function.name, tc.function.arguments)
                 plan_updated = plan_updated or flags.get("plan_updated", False)
                 goal_updated = goal_updated or flags.get("goal_updated", False)
                 fuel_updated = fuel_updated or flags.get("fuel_updated", False)
                 convo.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             continue
 
+        _finish_trace(trace, msg.content or "")
         return {"reply": msg.content or "", "plan_updated": plan_updated,
                 "goal_updated": goal_updated, "fuel_updated": fuel_updated}
 
 
 def chat_stream(
     messages: list[dict], context: str | None = None, persona: str = "coach",
-    on_plan_updated=None, on_goal_updated=None,
+    on_plan_updated=None, on_goal_updated=None, meta: dict | None = None,
 ):
     """Generator yielding SSE-formatted chunks. Streams assistant text; when the
     model calls tools the round is executed and the loop continues."""
     base, ctx = build_system(persona, context)
-    convo = [llm.system_message(base, ctx)] + _windowed(messages)
+    sent = _windowed(messages)
+    convo = [llm.system_message(base, ctx)] + sent
     tools = llm.with_cache_control(llm.to_openai_tools(TOOLS))
     plan_updated = goal_updated = fuel_updated = False
+    trace = _new_trace(persona, base, ctx, sent, meta)
 
     while True:
+        rnd: dict = {"tools": []}
+        trace["rounds"].append(rnd)
+        t = time.perf_counter()
         stream = llm.completion(convo, tools, max_tokens=16384, stream=True)
         content_parts: list[str] = []
         slots: dict[int, dict] = {}  # tool-call index -> accumulating {id, name, args}
 
         for chunk in stream:
+            if "ttft_ms" not in rnd:
+                rnd["ttft_ms"] = round((time.perf_counter() - t) * 1000)
+            usage = _usage(chunk)
+            if usage and usage.get("prompt"):
+                rnd["usage"] = usage
+            if not chunk.choices:  # usage-only final chunk
+                continue
             delta = chunk.choices[0].delta
             text = getattr(delta, "content", None)
             if text:
@@ -896,6 +979,8 @@ def chat_stream(
                     if fn.arguments:
                         slot["args"] += fn.arguments
 
+        rnd["llm_ms"] = round((time.perf_counter() - t) * 1000)
+        rnd["text"] = "".join(content_parts)
         if slots:
             ordered = [slots[i] for i in sorted(slots)]
             for i, s in enumerate(ordered):
@@ -911,7 +996,7 @@ def chat_stream(
                 ],
             })
             for s in ordered:
-                result, flags = _dispatch_tool(s["name"], _parse_args(s["args"]))
+                result, flags = _traced_dispatch(rnd, s["name"], s["args"])
                 if flags.get("plan_updated"):
                     plan_updated = True
                     if on_plan_updated:
@@ -927,4 +1012,5 @@ def chat_stream(
 
         break
 
+    _finish_trace(trace, "".join(content_parts))
     yield f"data: {json.dumps({'done': True, 'plan_updated': plan_updated, 'goal_updated': goal_updated, 'fuel_updated': fuel_updated})}\n\n"
