@@ -478,6 +478,86 @@ inputEl.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
+// ── Voice dictation (browser Web Speech API) ─────────────────────────────────
+// One language at a time (the API can't mix): tap the small EN/עב button to
+// switch; the choice is remembered. Hidden on browsers without the API
+// (e.g. Firefox). Chrome transcribes on Google's servers, Safari on Apple's
+// or on-device; nothing goes through this app's server until you send.
+(function setupVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  const LANGS = [{ code: "en-US", label: "EN" }, { code: "he-IL", label: "עב" }];
+  const group = document.getElementById("voice-group");
+  const mic   = document.getElementById("voice-mic");
+  const langB = document.getElementById("voice-lang");
+  let langIdx = 0;
+  try { langIdx = Math.max(0, LANGS.findIndex(l => l.code === localStorage.getItem("voiceLang"))); } catch {}
+  let rec = null, base = "", finalText = "", discard = false, restart = false;
+
+  const showLang = () => { langB.textContent = LANGS[langIdx].label; };
+  showLang();
+  group.hidden = false;
+
+  function stop() { if (rec) rec.stop(); }
+  function discardAndStop() {  // message sent: late results must not refill the box
+    if (!rec) return;
+    discard = true;
+    rec.onresult = null;
+    rec.abort();
+  }
+
+  function start() {
+    rec = new SR();
+    rec.lang = LANGS[langIdx].code;
+    rec.continuous = true;
+    rec.interimResults = true;
+    base = inputEl.value ? inputEl.value.replace(/\s*$/, " ") : "";
+    finalText = "";
+    discard = restart = false;
+    rec.onresult = e => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      inputEl.value = base + finalText + interim;
+      inputEl.dispatchEvent(new Event("input"));  // auto-resize
+    };
+    rec.onerror = e => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        appendMsg("system", "Microphone blocked: allow it for this site in the browser settings.");
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
+        appendMsg("system", `Dictation error: ${e.error}`);
+      }
+    };
+    rec.onend = () => {
+      rec = null;
+      mic.classList.remove("listening");
+      mic.title = "Dictate";
+      if (!discard) {
+        inputEl.value = base + finalText || inputEl.value;  // drop a dangling interim
+        inputEl.dispatchEvent(new Event("input"));
+      }
+      if (restart) start();  // language switched mid-dictation
+    };
+    rec.start();
+    mic.classList.add("listening");
+    mic.title = "Stop dictation";
+  }
+
+  mic.addEventListener("click", () => (rec ? stop() : start()));
+  langB.addEventListener("click", () => {
+    langIdx = (langIdx + 1) % LANGS.length;
+    showLang();
+    try { localStorage.setItem("voiceLang", LANGS[langIdx].code); } catch {}
+    if (rec) { restart = true; stop(); }  // onend restarts in the new language
+  });
+  // Sending while dictating: stop so late results don't refill the box.
+  sendBtn.addEventListener("click", discardAndStop, true);
+  inputEl.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) discardAndStop(); }, true);
+})();
+
 // Initialise sessions from server (with localStorage migration).
 migrateLocalStorage().then(loadSessionsList);
 
